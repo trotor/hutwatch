@@ -1,0 +1,15 @@
+# HutWatch configuration example
+# Copy this file to config.yaml and fill in your values
+
+sensors:
+  - mac: "AA:BB:CC:DD:EE:FF"
+    name: "Ulko"
+    type: ruuvi
+  - mac: "11:22:33:44:55:66"
+    name: "Sisällä"
+    type: xiaomi
+
+telegram:
+  token: "123456789:ABC..."
+  chat_id: -1001234567890
+  report_interval: 3600  # seconds (1 hour)
