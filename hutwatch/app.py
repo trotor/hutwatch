@@ -1,14 +1,18 @@
 """Main application coordinator."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import signal
 from pathlib import Path
 from typing import Optional
 
+from .aggregator import Aggregator
 from .ble.scanner import BleScanner
 from .ble.sensor_store import SensorStore
 from .config import load_config
+from .db import Database
 from .models import AppConfig
 from .telegram.bot import TelegramBot
 
@@ -18,11 +22,14 @@ logger = logging.getLogger(__name__)
 class HutWatchApp:
     """Main application that coordinates all components."""
 
-    def __init__(self, config_path: Path) -> None:
+    def __init__(self, config_path: Path, db_path: Optional[Path] = None) -> None:
         self._config_path = config_path
+        self._db_path = db_path or config_path.parent / "hutwatch.db"
         self._config: Optional[AppConfig] = None
         self._store: Optional[SensorStore] = None
+        self._db: Optional[Database] = None
         self._scanner: Optional[BleScanner] = None
+        self._aggregator: Optional[Aggregator] = None
         self._bot: Optional[TelegramBot] = None
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
@@ -34,15 +41,21 @@ class HutWatchApp:
         # Load configuration
         self._config = load_config(self._config_path)
 
+        # Initialize database
+        self._db = Database(self._db_path)
+        self._db.connect()
+
         # Initialize components
         self._store = SensorStore()
         self._scanner = BleScanner(self._config, self._store)
+        self._aggregator = Aggregator(self._config, self._store, self._db)
 
         if self._config.telegram:
-            self._bot = TelegramBot(self._config, self._store)
+            self._bot = TelegramBot(self._config, self._store, self._db)
 
         # Start components
         await self._scanner.start()
+        await self._aggregator.start()
 
         if self._bot:
             await self._bot.start()
@@ -77,8 +90,14 @@ class HutWatchApp:
         if self._bot:
             await self._bot.stop()
 
+        if self._aggregator:
+            await self._aggregator.stop()
+
         if self._scanner:
             await self._scanner.stop()
+
+        if self._db:
+            self._db.close()
 
         logger.info("HutWatch stopped")
 

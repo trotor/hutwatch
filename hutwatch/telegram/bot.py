@@ -1,13 +1,14 @@
 """Telegram bot for HutWatch."""
 
+from __future__ import annotations
+
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
-    ContextTypes,
 )
 
 from ..ble.sensor_store import SensorStore
@@ -15,18 +16,27 @@ from ..models import AppConfig, TelegramConfig
 from .commands import CommandHandlers
 from .scheduler import ReportScheduler
 
+if TYPE_CHECKING:
+    from ..db import Database
+
 logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
     """Telegram bot for temperature monitoring."""
 
-    def __init__(self, config: AppConfig, store: SensorStore) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        store: SensorStore,
+        db: Optional[Database] = None,
+    ) -> None:
         self._config = config
         self._store = store
+        self._db = db
         self._app: Optional[Application] = None
-        self._commands = CommandHandlers(config, store)
-        self._scheduler = ReportScheduler(config, store)
+        self._commands = CommandHandlers(config, store, db)
+        self._scheduler = ReportScheduler(config, store, self._commands)
 
         if not config.telegram:
             raise ValueError("Telegram configuration is required")
@@ -47,6 +57,9 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("temps", self._commands.temps))
         self._app.add_handler(CommandHandler("status", self._commands.status))
         self._app.add_handler(CommandHandler("history", self._commands.history))
+        self._app.add_handler(CommandHandler("stats", self._commands.stats))
+        self._app.add_handler(CommandHandler("graph", self._commands.graph))
+        self._app.add_handler(CommandHandler("report", self._commands.report))
         self._app.add_handler(CommandHandler("help", self._commands.help))
         self._app.add_handler(CommandHandler("start", self._commands.help))
 

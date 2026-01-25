@@ -1,6 +1,9 @@
 # Configuration with secrets
 config.yaml
 
+# Database
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
