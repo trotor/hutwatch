@@ -124,6 +124,17 @@ journalctl -u hutwatch -f
 | `/history Ulkona 24` | Tietyn anturin 24h historia |
 | `/help` | Ohje |
 
+## Vinkki: AI-avusteinen konfigurointi
+
+Telegram-botin luonti, chat ID:n hakeminen ja anturien etsiminen onnistuu helposti myös AI-apurin avulla. Esimerkiksi [Claude Code](https://claude.ai/download) osaa:
+
+- Skannata BLE-laitteet ja tunnistaa anturit automaattisesti
+- Hakea Telegram chat ID:n puolestasi
+- Generoida config.yaml-tiedoston löydetyillä antureilla
+- Asentaa ja käynnistää palvelun
+
+Kerro vain mitä haluat tehdä, niin AI hoitaa loput. :)
+
 ## Xiaomi-anturin firmware
 
 Xiaomi LYWSD03MMC vaatii custom firmwaren BLE-mainosten lähettämiseen:
