@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 from telegram import Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
 )
 
@@ -18,6 +19,7 @@ from .scheduler import ReportScheduler
 
 if TYPE_CHECKING:
     from ..db import Database
+    from ..weather import WeatherFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +31,16 @@ class TelegramBot:
         self,
         config: AppConfig,
         store: SensorStore,
-        db: Optional[Database] = None,
+        db: Optional["Database"] = None,
+        weather: Optional["WeatherFetcher"] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
+        self._weather = weather
         self._app: Optional[Application] = None
-        self._commands = CommandHandlers(config, store, db)
-        self._scheduler = ReportScheduler(config, store, self._commands)
+        self._commands = CommandHandlers(config, store, db, weather)
+        self._scheduler = ReportScheduler(config, store, self._commands, weather)
 
         if not config.telegram:
             raise ValueError("Telegram configuration is required")
@@ -60,8 +64,18 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("stats", self._commands.stats))
         self._app.add_handler(CommandHandler("graph", self._commands.graph))
         self._app.add_handler(CommandHandler("report", self._commands.report))
+        self._app.add_handler(CommandHandler("devices", self._commands.devices))
+        self._app.add_handler(CommandHandler("laitteet", self._commands.devices))
+        self._app.add_handler(CommandHandler("rename", self._commands.rename))
+        self._app.add_handler(CommandHandler("nimea", self._commands.rename))
+        self._app.add_handler(CommandHandler("weather", self._commands.weather))
+        self._app.add_handler(CommandHandler("saa", self._commands.weather))
+        self._app.add_handler(CommandHandler("menu", self._commands.menu))
         self._app.add_handler(CommandHandler("help", self._commands.help))
-        self._app.add_handler(CommandHandler("start", self._commands.help))
+        self._app.add_handler(CommandHandler("start", self._commands.menu))
+
+        # Callback query handler for inline buttons
+        self._app.add_handler(CallbackQueryHandler(self._commands.button_callback))
 
         # Setup scheduled reports
         if self._tg_config.report_interval > 0:

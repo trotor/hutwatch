@@ -3,13 +3,20 @@
 
 sensors:
   - mac: "AA:BB:CC:DD:EE:FF"
-    name: "Ulko"
+    name: "Ruuvi1"
     type: ruuvi
   - mac: "11:22:33:44:55:66"
-    name: "Sisällä"
+    name: "Xiaomi1"
     type: xiaomi
 
 telegram:
-  token: "123456789:ABC..."
-  chat_id: -1001234567890
-  report_interval: 3600  # seconds (1 hour)
+  token: "your-telegram-bot-token"
+  chat_id: 123456789
+  report_interval: 3600
+
+# Weather from yr.no (MET Norway API)
+# Find coordinates: https://www.latlong.net/
+weather:
+  latitude: 60.1699
+  longitude: 24.9384
+  location_name: "Helsinki"

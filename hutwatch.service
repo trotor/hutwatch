@@ -8,26 +8,9 @@ Type=simple
 User=tronkko
 Group=tronkko
 WorkingDirectory=/home/tronkko/code/hutwatch
-ExecStart=/usr/bin/python3 -m hutwatch -c /home/tronkko/code/hutwatch/config.yaml
-
-# BLE requires these capabilities
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-
-# Restart on failure
+ExecStart=/home/tronkko/code/hutwatch/venv/bin/python -m hutwatch -c config.yaml
 Restart=on-failure
 RestartSec=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=hutwatch
-
-# Security hardening
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/tronkko/code/hutwatch
-PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .models import AppConfig
 
+if TYPE_CHECKING:
+    from .weather import WeatherFetcher
+
 logger = logging.getLogger(__name__)
 
 # Aggregation interval in seconds (5 minutes)
 AGGREGATION_INTERVAL = 300
+
+# Weather fetch interval in seconds (10 minutes)
+WEATHER_FETCH_INTERVAL = 600
 
 
 class Aggregator:
@@ -25,12 +31,15 @@ class Aggregator:
         config: AppConfig,
         store: SensorStore,
         db: Database,
+        weather: Optional["WeatherFetcher"] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
+        self._weather = weather
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._weather_task: Optional[asyncio.Task] = None
         self._last_aggregation: dict[str, datetime] = {}
 
     async def start(self) -> None:
@@ -41,6 +50,10 @@ class Aggregator:
         logger.info("Starting data aggregator (interval: %ds)", AGGREGATION_INTERVAL)
         self._running = True
         self._task = asyncio.create_task(self._run())
+
+        if self._weather:
+            logger.info("Starting weather fetcher (interval: %ds)", WEATHER_FETCH_INTERVAL)
+            self._weather_task = asyncio.create_task(self._run_weather())
 
     async def stop(self) -> None:
         """Stop the aggregator."""
@@ -57,6 +70,14 @@ class Aggregator:
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+        if self._weather_task:
+            self._weather_task.cancel()
+            try:
+                await self._weather_task
+            except asyncio.CancelledError:
+                pass
+            self._weather_task = None
 
     async def _run(self) -> None:
         """Main aggregation loop."""
@@ -134,4 +155,45 @@ class Aggregator:
                 temp_avg,
                 temp_min,
                 temp_max,
+            )
+
+    async def _run_weather(self) -> None:
+        """Weather fetch loop."""
+        # Fetch immediately on start
+        await self._fetch_weather()
+
+        while self._running:
+            try:
+                await asyncio.sleep(WEATHER_FETCH_INTERVAL)
+                await self._fetch_weather()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Weather fetch error: %s", e)
+
+    async def _fetch_weather(self) -> None:
+        """Fetch and save weather data."""
+        if not self._weather:
+            return
+
+        weather = await self._weather.fetch()
+        if weather:
+            # Round timestamp to 5-minute boundary
+            now = datetime.now()
+            timestamp = now.replace(
+                minute=(now.minute // 5) * 5,
+                second=0,
+                microsecond=0,
+            )
+
+            self._db.save_weather(
+                timestamp=timestamp,
+                temperature=weather.temperature,
+                humidity=weather.humidity,
+                pressure=weather.pressure,
+                wind_speed=weather.wind_speed,
+                wind_direction=weather.wind_direction,
+                precipitation=weather.precipitation,
+                cloud_cover=weather.cloud_cover,
+                symbol_code=weather.symbol_code,
             )

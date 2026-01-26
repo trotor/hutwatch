@@ -56,11 +56,36 @@ class TelegramConfig:
 
 
 @dataclass
+class WeatherConfig:
+    """Weather API configuration."""
+
+    latitude: float
+    longitude: float
+    location_name: str = "Sää"
+
+
+@dataclass
+class WeatherData:
+    """Current weather data."""
+
+    timestamp: datetime
+    temperature: float
+    humidity: Optional[float] = None
+    pressure: Optional[float] = None
+    wind_speed: Optional[float] = None
+    wind_direction: Optional[float] = None
+    precipitation: Optional[float] = None
+    cloud_cover: Optional[float] = None
+    symbol_code: Optional[str] = None
+
+
+@dataclass
 class AppConfig:
     """Application configuration."""
 
     sensors: list[SensorConfig] = field(default_factory=list)
     telegram: Optional[TelegramConfig] = None
+    weather: Optional[WeatherConfig] = None
 
     def get_sensor_by_mac(self, mac: str) -> Optional[SensorConfig]:
         """Get sensor config by MAC address."""
@@ -73,3 +98,34 @@ class AppConfig:
     def get_sensor_macs(self) -> set[str]:
         """Get all configured sensor MAC addresses."""
         return {s.mac for s in self.sensors}
+
+
+@dataclass
+class DeviceInfo:
+    """Device information from database."""
+
+    mac: str
+    alias: Optional[str]
+    display_order: int
+    sensor_type: str
+    config_name: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.mac = self.mac.upper()
+
+    def get_display_name(self) -> str:
+        """Get the name to display for this device.
+
+        Priority: alias > config_name > MAC address
+        """
+        if self.alias:
+            return self.alias
+        if self.config_name:
+            return self.config_name
+        return self.mac
+
+    def get_full_display_name(self) -> str:
+        """Get full display name with original name in parentheses if aliased."""
+        if self.alias and self.config_name:
+            return f"{self.alias} ({self.config_name})"
+        return self.get_display_name()

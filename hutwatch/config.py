@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from .models import AppConfig, SensorConfig, SensorType, TelegramConfig
+from .models import AppConfig, SensorConfig, SensorType, TelegramConfig, WeatherConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,24 @@ def load_config(config_path: Path) -> AppConfig:
         except KeyError as e:
             logger.warning("Invalid Telegram configuration: missing %s", e)
 
-    config = AppConfig(sensors=sensors, telegram=telegram_config)
+    weather_config = None
+    if "weather" in data:
+        w_data = data["weather"]
+        try:
+            weather_config = WeatherConfig(
+                latitude=float(w_data["latitude"]),
+                longitude=float(w_data["longitude"]),
+                location_name=w_data.get("location_name", "Sää"),
+            )
+            logger.debug(
+                "Loaded weather configuration: %s (%.4f, %.4f)",
+                weather_config.location_name,
+                weather_config.latitude,
+                weather_config.longitude,
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning("Invalid weather configuration: %s", e)
+
+    config = AppConfig(sensors=sensors, telegram=telegram_config, weather=weather_config)
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config

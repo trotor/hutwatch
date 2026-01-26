@@ -15,6 +15,7 @@ from .config import load_config
 from .db import Database
 from .models import AppConfig
 from .telegram.bot import TelegramBot
+from .weather import WeatherFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class HutWatchApp:
         self._db: Optional[Database] = None
         self._scanner: Optional[BleScanner] = None
         self._aggregator: Optional[Aggregator] = None
+        self._weather: Optional[WeatherFetcher] = None
         self._bot: Optional[TelegramBot] = None
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
@@ -45,13 +47,27 @@ class HutWatchApp:
         self._db = Database(self._db_path)
         self._db.connect()
 
+        # Sync devices from config to database
+        self._db.sync_devices_from_config(self._config.sensors)
+
+        # Initialize weather fetcher if configured
+        if self._config.weather:
+            self._weather = WeatherFetcher(self._config.weather)
+            await self._weather.start()
+            logger.info(
+                "Weather configured for %s (%.4f, %.4f)",
+                self._config.weather.location_name,
+                self._config.weather.latitude,
+                self._config.weather.longitude,
+            )
+
         # Initialize components
         self._store = SensorStore()
         self._scanner = BleScanner(self._config, self._store)
-        self._aggregator = Aggregator(self._config, self._store, self._db)
+        self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
         if self._config.telegram:
-            self._bot = TelegramBot(self._config, self._store, self._db)
+            self._bot = TelegramBot(self._config, self._store, self._db, self._weather)
 
         # Start components
         await self._scanner.start()
@@ -95,6 +111,9 @@ class HutWatchApp:
 
         if self._scanner:
             await self._scanner.stop()
+
+        if self._weather:
+            await self._weather.stop()
 
         if self._db:
             self._db.close()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from telegram.ext import ContextTypes
 
@@ -12,6 +12,7 @@ from ..ble.sensor_store import SensorStore
 from ..models import AppConfig
 
 if TYPE_CHECKING:
+    from ..weather import WeatherFetcher
     from .commands import CommandHandlers
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,13 @@ class ReportScheduler:
         self,
         config: AppConfig,
         store: SensorStore,
-        commands: CommandHandlers,
+        commands: "CommandHandlers",
+        weather: Optional["WeatherFetcher"] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._commands = commands
+        self._weather = weather
 
     async def send_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send scheduled temperature report."""
@@ -60,6 +63,18 @@ class ReportScheduler:
         if not has_data:
             logger.warning("No sensor data available for scheduled report")
             return
+
+        # Add weather info if available
+        if self._weather and self._weather.latest:
+            from ..weather import get_weather_emoji
+
+            w = self._weather.latest
+            emoji = get_weather_emoji(w.symbol_code)
+            lines.append("")
+            weather_line = f"{emoji} *{self._weather.location_name}*: {w.temperature:.1f}°C"
+            if w.humidity is not None:
+                weather_line += f", {w.humidity:.0f}%"
+            lines.append(weather_line)
 
         try:
             await context.bot.send_message(
