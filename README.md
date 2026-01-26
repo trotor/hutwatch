@@ -1,31 +1,35 @@
 # HutWatch
 
-BLE-lämpötilaseuranta Telegram-botilla. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista ja lähettää tiedot Telegramiin.
+BLE-lämpötilaseuranta Telegram-botilla. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista, hakee ulkosään yr.no:sta ja lähettää tiedot Telegramiin.
 
 ## Ominaisuudet
 
 - RuuviTag (Data Format 3/5) tuki
 - Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) tuki
-- Telegram-komennot: `/temps`, `/status`, `/history`
+- Ulkosää MET Norway API:sta (yr.no)
+- Telegram-komennot: `/temps`, `/weather`, `/history`, `/stats`, `/graph`
+- Interaktiivinen valikko inline-napeilla (`/menu`)
 - Ajastetut raportit (oletus 1h välein)
-- 24h historia
+- SQLite-tietokanta pitkäaikaishistorialle
+- 24h muistivälimuisti + 90 päivän tietokantahistoria
 - Systemd-palvelu
 
 ## Vaatimukset
 
-- Python 3.8+
-- Bluetooth-adapteri
-- Linux (testattu Ubuntu 20.04)
+- Python 3.10+
+- Bluetooth-adapteri (BLE-tuki)
+- Linux (testattu Ubuntu 20.04/22.04)
 
 ## Asennus
 
 ```bash
 # Kloonaa repo
-git clone https://github.com/YOUR_USERNAME/hutwatch.git
+git clone https://github.com/trotor/hutwatch.git
 cd hutwatch
 
-# Asenna riippuvuudet
-pip3 install -r requirements.txt
+# Luo virtuaaliympäristö ja asenna riippuvuudet
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
 
 # Kopioi ja muokkaa konfiguraatio
 cp config.example.yaml config.yaml
@@ -49,6 +53,12 @@ telegram:
   token: "YOUR_BOT_TOKEN"
   chat_id: YOUR_CHAT_ID
   report_interval: 3600
+
+# Ulkosää yr.no:sta (valinnainen)
+weather:
+  latitude: 60.1699
+  longitude: 24.9384
+  location_name: "Helsinki"
 ```
 
 ### Telegram-botin luonti
@@ -62,7 +72,7 @@ telegram:
 1. Lähetä viesti botillesi Telegramissa
 2. Aja:
 ```bash
-python3 -c "
+./venv/bin/python -c "
 import asyncio
 from telegram import Bot
 bot = Bot('YOUR_TOKEN')
@@ -76,7 +86,7 @@ for u in updates:
 ### Anturien MAC-osoitteiden etsiminen
 
 ```bash
-python3 -c "
+./venv/bin/python -c "
 import asyncio
 from bleak import BleakScanner
 
@@ -90,18 +100,22 @@ asyncio.run(scan())
 "
 ```
 
+### Koordinaattien etsiminen säälle
+
+Hae koordinaatit esim. [latlong.net](https://www.latlong.net/) -palvelusta.
+
 ## Käyttö
 
 ### Manuaalinen käynnistys
 
 ```bash
-python3 -m hutwatch -c config.yaml -v
+./venv/bin/python -m hutwatch -c config.yaml -v
 ```
 
 ### Systemd-palvelu
 
 ```bash
-# Muokkaa polut hutwatch.service-tiedostossa
+# Muokkaa polut hutwatch.service-tiedostossa tarvittaessa
 sudo cp hutwatch.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now hutwatch
@@ -110,19 +124,48 @@ sudo systemctl enable --now hutwatch
 sudo systemctl status hutwatch
 
 # Lokit
-journalctl -u hutwatch -f
+sudo journalctl -u hutwatch -f
 ```
 
 ## Telegram-komennot
 
+### Peruskomennot
+
 | Komento | Kuvaus |
 |---------|--------|
-| `/temps` | Kaikkien anturien lämpötilat |
-| `/status` | Järjestelmän tila, signaalivoimakkuudet |
-| `/history` | Lämpötilahistoria (6h oletus) |
-| `/history 12` | 12 tunnin historia |
-| `/history Ulkona 24` | Tietyn anturin 24h historia |
+| `/menu` | Interaktiivinen valikko napeilla |
+| `/temps` | Kaikkien anturien lämpötilat + sää |
+| `/weather` | Yksityiskohtainen säätila |
+| `/status` | Järjestelmän tila |
 | `/help` | Ohje |
+
+### Historia ja tilastot
+
+| Komento | Kuvaus |
+|---------|--------|
+| `/history` | Lämpötilahistoria (6h oletus) |
+| `/history 24h` | 24 tunnin historia |
+| `/history 7d` | 7 päivän historia |
+| `/stats 1d` | Päivän tilastot (min/max/avg) |
+| `/graph 1 24h` | ASCII-graafi anturille 1 |
+| `/graph sää 48h` | Sään lämpötilagraafi |
+
+### Laitteiden hallinta
+
+| Komento | Kuvaus |
+|---------|--------|
+| `/devices` | Listaa laitteet numeroineen |
+| `/rename 1 Olohuone` | Nimeä laite 1 uudelleen |
+| `/report on/off` | Ajastetut raportit päälle/pois |
+
+## Interaktiivinen valikko
+
+Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
+
+- Lämpötilat ja sää yhdellä napilla
+- Historia 1d / 7d / 30d
+- Tilastot 1d / 7d / 30d
+- Päivitä-nappi jokaisessa näkymässä
 
 ## Vinkki: AI-avusteinen konfigurointi
 
@@ -133,7 +176,7 @@ Telegram-botin luonti, chat ID:n hakeminen ja anturien etsiminen onnistuu helpos
 - Generoida config.yaml-tiedoston löydetyillä antureilla
 - Asentaa ja käynnistää palvelun
 
-Kerro vain mitä haluat tehdä, niin AI hoitaa loput. :)
+Kerro vain mitä haluat tehdä, niin AI hoitaa loput.
 
 ## Xiaomi-anturin firmware
 
