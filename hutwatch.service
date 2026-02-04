@@ -1,6 +1,6 @@
 [Unit]
 Description=HutWatch BLE Temperature Monitor
-After=network.target bluetooth.target
+After=network.target bluetooth.target local-fs.target
 Wants=bluetooth.target
 
 [Service]
@@ -8,7 +8,15 @@ Type=simple
 User=tronkko
 Group=tronkko
 WorkingDirectory=/home/tronkko/code/hutwatch
+
+# Capabilities for Bluetooth adapter reset without sudo
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+# Wait for pyenv to be available, then start
+ExecStartPre=/bin/bash -c 'until [ -x /home/tronkko/.pyenv/versions/3.12.12/bin/python3.12 ]; do sleep 1; done'
 ExecStart=/home/tronkko/code/hutwatch/venv/bin/python -m hutwatch -c config.yaml
+
 Restart=on-failure
 RestartSec=10
 

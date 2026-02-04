@@ -1,9 +1,10 @@
-"""BLE scanner using Bleak."""
+"""BLE scanner using Bleak with periodic restart."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -19,7 +20,20 @@ logger = logging.getLogger(__name__)
 
 
 class BleScanner:
-    """BLE scanner that detects and parses sensor advertisements."""
+    """BLE scanner that detects and parses sensor advertisements.
+
+    Restarts periodically to work around BlueZ/Bleak issues on Linux.
+    """
+
+    # Proactive restart interval - restart scanner even if working
+    # BlueZ often silently stops after ~30-60s, so restart frequently
+    RESTART_INTERVAL_SECONDS = 60  # 1 minute
+
+    # Watchdog timeout - force restart if no data received
+    WATCHDOG_TIMEOUT_SECONDS = 45  # 45 seconds
+
+    # Timeout for stop() operation - don't let it hang forever
+    STOP_TIMEOUT_SECONDS = 10
 
     def __init__(
         self,
@@ -32,6 +46,7 @@ class BleScanner:
         self._on_reading = on_reading
         self._scanner: Optional[BleakScannerLib] = None
         self._running = False
+        self._last_data_time: Optional[datetime] = None
 
         # Initialize parsers
         self._ruuvi_parser = RuuviParser()
@@ -74,6 +89,9 @@ class BleScanner:
                 reading.rssi = advertisement_data.rssi
                 self._store.add_reading(reading)
 
+                # Update watchdog timestamp
+                self._last_data_time = datetime.now()
+
                 if self._on_reading:
                     self._on_reading(reading)
 
@@ -87,6 +105,72 @@ class BleScanner:
         except Exception as e:
             logger.warning("Error parsing data from %s: %s", mac, e)
 
+    async def _create_scanner(self) -> BleakScannerLib:
+        """Create a fresh scanner instance."""
+        return BleakScannerLib(
+            detection_callback=self._detection_callback,
+        )
+
+    async def _stop_scanner_safe(self) -> None:
+        """Stop scanner with timeout protection."""
+        if self._scanner is None:
+            return
+
+        try:
+            await asyncio.wait_for(
+                self._scanner.stop(),
+                timeout=self.STOP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Scanner stop() timed out after %ds", self.STOP_TIMEOUT_SECONDS)
+        except Exception as e:
+            logger.debug("Error stopping scanner: %s", e)
+        finally:
+            self._scanner = None
+
+    def _reset_bluetooth_adapter(self) -> None:
+        """Reset Bluetooth adapter to recover from stuck state.
+
+        Uses bluetoothctl (D-Bus) which works without sudo when user
+        is in bluetooth group, or hciconfig with CAP_NET_ADMIN.
+        """
+        # Try bluetoothctl first (works via D-Bus, no sudo needed)
+        try:
+            # Power cycle the adapter
+            subprocess.run(
+                ["bluetoothctl", "power", "off"],
+                capture_output=True,
+                timeout=5,
+            )
+            subprocess.run(
+                ["bluetoothctl", "power", "on"],
+                capture_output=True,
+                timeout=5,
+            )
+            logger.info("Bluetooth adapter power cycled via bluetoothctl")
+            return
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            logger.debug("bluetoothctl failed: %s", e)
+
+        # Fallback to hciconfig (requires CAP_NET_ADMIN or sudo)
+        try:
+            result = subprocess.run(
+                ["hciconfig", "hci0", "reset"],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                logger.info("Bluetooth adapter reset via hciconfig")
+            else:
+                logger.debug("hciconfig reset failed: %s", result.stderr.decode().strip())
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            logger.debug("hciconfig failed: %s", e)
+
+    @property
+    def is_running(self) -> bool:
+        """Check if scanner is running."""
+        return self._running
+
     async def start(self) -> None:
         """Start BLE scanning."""
         if self._running:
@@ -95,12 +179,9 @@ class BleScanner:
 
         logger.info("Starting BLE scanner...")
         self._running = True
-
-        self._scanner = BleakScannerLib(
-            detection_callback=self._detection_callback,
-        )
-
+        self._scanner = await self._create_scanner()
         await self._scanner.start()
+        self._last_data_time = datetime.now()
         logger.info("BLE scanner started")
 
     async def stop(self) -> None:
@@ -110,23 +191,99 @@ class BleScanner:
 
         logger.info("Stopping BLE scanner...")
         self._running = False
-
-        if self._scanner:
-            await self._scanner.stop()
-            self._scanner = None
-
+        await self._stop_scanner_safe()
         logger.info("BLE scanner stopped")
 
-    @property
-    def is_running(self) -> bool:
-        """Check if scanner is running."""
-        return self._running
+    def _should_restart(self) -> tuple[bool, str]:
+        """Check if scanner should be restarted.
+
+        Returns (should_restart, reason).
+        """
+        now = datetime.now()
+
+        # Check watchdog - no data received
+        if self._last_data_time:
+            elapsed = (now - self._last_data_time).total_seconds()
+            if elapsed > self.WATCHDOG_TIMEOUT_SECONDS:
+                return True, f"no data for {elapsed:.0f}s"
+
+        return False, ""
+
+    async def run_with_restart(self) -> None:
+        """Run scanner with periodic restarts.
+
+        Restarts every RESTART_INTERVAL_SECONDS to work around
+        BlueZ issues, and also restarts on watchdog timeout.
+        """
+        restart_count = 0
+
+        while True:
+            try:
+                restart_count += 1
+                logger.info(
+                    "Starting BLE scanner (cycle %d)...",
+                    restart_count,
+                )
+
+                # Reset adapter before starting (helps with stuck state)
+                if restart_count > 1:
+                    self._reset_bluetooth_adapter()
+                    await asyncio.sleep(2)  # Give adapter time to recover
+
+                # Create fresh scanner instance
+                self._scanner = await self._create_scanner()
+                await self._scanner.start()
+                self._last_data_time = datetime.now()
+                self._running = True
+
+                logger.info("BLE scanner running (cycle %d)", restart_count)
+
+                # Run until restart interval or watchdog triggers
+                cycle_start = datetime.now()
+                check_interval = 10  # Check every 10 seconds
+
+                while self._running:
+                    await asyncio.sleep(check_interval)
+
+                    # Check proactive restart interval
+                    cycle_elapsed = (datetime.now() - cycle_start).total_seconds()
+                    if cycle_elapsed >= self.RESTART_INTERVAL_SECONDS:
+                        logger.info(
+                            "Proactive restart after %.0fs",
+                            cycle_elapsed,
+                        )
+                        break
+
+                    # Check watchdog
+                    should_restart, reason = self._should_restart()
+                    if should_restart:
+                        logger.warning("Watchdog restart: %s", reason)
+                        break
+
+                # Stop current scanner
+                await self._stop_scanner_safe()
+
+                # If we're shutting down, exit
+                if not self._running:
+                    logger.info("BLE scanner stopped")
+                    return
+
+                # Brief pause before restart
+                await asyncio.sleep(1)
+
+            except asyncio.CancelledError:
+                logger.info("BLE scanner cancelled")
+                await self._stop_scanner_safe()
+                return
+
+            except Exception as e:
+                logger.error("BLE scanner error: %s", e)
+                await self._stop_scanner_safe()
+
+                # Error recovery - reset adapter and wait
+                self._reset_bluetooth_adapter()
+                await asyncio.sleep(5)
 
     async def run_forever(self) -> None:
-        """Run scanner indefinitely."""
-        await self.start()
-        try:
-            while self._running:
-                await asyncio.sleep(1)
-        finally:
-            await self.stop()
+        """Run scanner indefinitely (legacy method)."""
+        await self.run_with_restart()
