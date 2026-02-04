@@ -123,3 +123,58 @@ class TelegramBot:
             )
         except Exception as e:
             logger.error("Failed to send message: %s", e)
+
+    async def run_with_restart(
+        self,
+        restart_delay: float = 5.0,
+        max_restart_delay: float = 60.0,
+    ) -> None:
+        """Run bot with automatic restart on failure.
+
+        Uses exponential backoff for restart delays.
+        """
+        import asyncio
+
+        current_delay = restart_delay
+
+        while True:
+            try:
+                logger.info("Starting Telegram bot with restart support...")
+                await self.start()
+
+                # Reset delay on successful start
+                current_delay = restart_delay
+
+                # Run until stopped - bot runs via polling
+                while self._app:
+                    await asyncio.sleep(1)
+
+                # Clean exit
+                logger.info("Telegram bot stopped cleanly")
+                break
+
+            except asyncio.CancelledError:
+                logger.info("Telegram bot cancelled")
+                break
+
+            except Exception as e:
+                logger.error("Telegram bot error: %s", e)
+
+                # Clean up
+                try:
+                    await self.stop()
+                except Exception:
+                    pass
+
+                # Wait before restart with exponential backoff
+                logger.info(
+                    "Restarting Telegram bot in %.1f seconds...",
+                    current_delay,
+                )
+                await asyncio.sleep(current_delay)
+
+                # Increase delay for next failure (exponential backoff)
+                current_delay = min(current_delay * 2, max_restart_delay)
+
+        # Final cleanup
+        await self.stop()

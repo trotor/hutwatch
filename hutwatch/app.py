@@ -35,6 +35,8 @@ class HutWatchApp:
         self._bot: Optional[TelegramBot] = None
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
+        self._scanner_task: Optional[asyncio.Task] = None
+        self._bot_task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         """Start all components."""
@@ -69,23 +71,26 @@ class HutWatchApp:
         if self._config.telegram:
             self._bot = TelegramBot(self._config, self._store, self._db, self._weather)
 
-        # Start components
-        await self._scanner.start()
+        # Start aggregator (does not need restart loop)
         await self._aggregator.start()
 
+        # Start scanner with restart loop in background task
+        self._scanner_task = asyncio.create_task(
+            self._scanner.run_with_restart(),
+            name="ble_scanner",
+        )
+
+        # Start bot with restart loop in background task
         if self._bot:
-            await self._bot.start()
+            self._bot_task = asyncio.create_task(
+                self._bot.run_with_restart(),
+                name="telegram_bot",
+            )
+            # Wait briefly for bot to start before sending message
+            await asyncio.sleep(2)
 
         self._running = True
         logger.info("HutWatch started successfully")
-
-        # Send startup message
-        if self._bot:
-            sensor_count = len(self._config.sensors)
-            await self._bot.send_message(
-                f"🟢 *HutWatch käynnistyi*\n"
-                f"Seurataan {sensor_count} anturia"
-            )
 
     async def stop(self) -> None:
         """Stop all components."""
@@ -101,6 +106,23 @@ class HutWatchApp:
                 await self._bot.send_message("🔴 *HutWatch pysähtyy*")
             except Exception:
                 pass
+
+        # Cancel background tasks
+        if self._bot_task:
+            self._bot_task.cancel()
+            try:
+                await self._bot_task
+            except asyncio.CancelledError:
+                pass
+            self._bot_task = None
+
+        if self._scanner_task:
+            self._scanner_task.cancel()
+            try:
+                await self._scanner_task
+            except asyncio.CancelledError:
+                pass
+            self._scanner_task = None
 
         # Stop components in reverse order
         if self._bot:
@@ -136,9 +158,34 @@ class HutWatchApp:
 
         try:
             await self.start()
-            await self._shutdown_event.wait()
+
+            # Wait for shutdown while monitoring background tasks
+            while not self._shutdown_event.is_set():
+                # Check background tasks for unexpected failures
+                await self._monitor_tasks()
+                await asyncio.sleep(5)
+
         finally:
             await self.stop()
+
+    async def _monitor_tasks(self) -> None:
+        """Monitor background tasks and log any failures."""
+        if self._scanner_task and self._scanner_task.done():
+            try:
+                # Get exception if any
+                exc = self._scanner_task.exception()
+                if exc:
+                    logger.error("BLE scanner task failed: %s", exc)
+            except asyncio.CancelledError:
+                pass
+
+        if self._bot_task and self._bot_task.done():
+            try:
+                exc = self._bot_task.exception()
+                if exc:
+                    logger.error("Telegram bot task failed: %s", exc)
+            except asyncio.CancelledError:
+                pass
 
     async def _handle_shutdown(self) -> None:
         """Handle shutdown signal."""

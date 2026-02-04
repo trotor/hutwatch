@@ -44,7 +44,7 @@ class ReportScheduler:
             return
 
         chat_id = self._config.telegram.chat_id
-        lines = [f"📊 *Lämpötilaraportti* ({datetime.now().strftime('%H:%M')})\n"]
+        lines = [f"📊 *Lämpötilaraportti* ({datetime.now().strftime('%d.%m. %H:%M')})\n"]
 
         has_data = False
         for sensor_config in self._config.sensors:

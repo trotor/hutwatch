@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _format_timestamp() -> str:
+    """Format current timestamp for display."""
+    return datetime.now().strftime("%d.%m. %H:%M")
+
+
 # Wind direction to Finnish text
 def _wind_direction_text(degrees: Optional[float]) -> str:
     """Convert wind direction degrees to Finnish text."""
@@ -47,7 +52,8 @@ class CommandHandlers:
         self._store = store
         self._db = db
         self._weather = weather
-        self._reports_enabled = True
+        self._reports_enabled = False
+        self._start_time = datetime.now()
 
     def _get_devices_with_config_names(self) -> list[DeviceInfo]:
         """Get all devices with config names populated."""
@@ -118,7 +124,7 @@ class CommandHandlers:
         if not update.effective_message:
             return
 
-        lines = ["🌡️ *Lämpötilat*\n"]
+        lines = [f"🌡️ *Lämpötilat* ({_format_timestamp()})\n"]
 
         # Use device ordering if database is available
         if self._db:
@@ -180,7 +186,7 @@ class CommandHandlers:
         if not update.effective_message:
             return
 
-        lines = ["🔧 *Järjestelmän tila*\n"]
+        lines = [f"🔧 *Järjestelmän tila* ({_format_timestamp()})\n"]
 
         # Sensor status
         lines.append("*Anturit:*")
@@ -247,6 +253,11 @@ class CommandHandlers:
         # Report status
         report_status = "päällä ✅" if self._reports_enabled else "pois ❌"
         lines.append(f"*Ajastettu raportointi:* {report_status}")
+
+        # Uptime
+        uptime = datetime.now() - self._start_time
+        uptime_str = self._format_uptime(uptime)
+        lines.append(f"*Käynnissä:* {uptime_str}")
 
         await update.effective_message.reply_text(
             "\n".join(lines),
@@ -317,7 +328,7 @@ class CommandHandlers:
             )
             return
 
-        lines = ["📱 *Laitteet:*\n"]
+        lines = [f"📱 *Laitteet* ({_format_timestamp()})\n"]
 
         for device in devices:
             display_name = device.get_full_display_name()
@@ -452,7 +463,7 @@ class CommandHandlers:
         else:
             # Show history for all sensors
             time_str = f"{days}d" if days else f"{hours}h"
-            lines = [f"📈 *Historia ({time_str})*\n"]
+            lines = [f"📈 *Historia ({time_str})* ({_format_timestamp()})\n"]
 
             # Use device ordering if database is available
             if self._db:
@@ -544,7 +555,7 @@ class CommandHandlers:
 
         temps = [r.temperature for r in readings]
         lines = [
-            f"📈 *{sensor_name} - Historia ({hours}h)*\n",
+            f"📈 *{sensor_name} - Historia ({hours}h)* ({_format_timestamp()})\n",
             f"Min: {min(temps):.1f}°C",
             f"Max: {max(temps):.1f}°C",
             f"Keskiarvo: {sum(temps)/len(temps):.1f}°C",
@@ -578,7 +589,7 @@ class CommandHandlers:
 
         time_str = f"{days}d" if days else f"{hours}h"
         lines = [
-            f"📈 *{sensor_name} - Historia ({time_str})*\n",
+            f"📈 *{sensor_name} - Historia ({time_str})* ({_format_timestamp()})\n",
             f"Min: {stats['temp_min']:.1f}°C",
             f"Max: {stats['temp_max']:.1f}°C",
             f"Keskiarvo: {stats['temp_avg']:.1f}°C",
@@ -643,7 +654,7 @@ class CommandHandlers:
         else:
             # Show stats for all sensors
             time_str = f"{days}d" if days else f"{hours}h"
-            lines = [f"📊 *Tilastot ({time_str})*\n"]
+            lines = [f"📊 *Tilastot ({time_str})* ({_format_timestamp()})\n"]
 
             devices = self._get_devices_with_config_names()
             for device in devices:
@@ -708,7 +719,7 @@ class CommandHandlers:
 
         time_str = f"{days} päivää" if days else f"{hours} tuntia"
         lines = [
-            f"📊 *{sensor_name} - Tilastot ({time_str})*\n",
+            f"📊 *{sensor_name} - Tilastot ({time_str})* ({_format_timestamp()})\n",
             f"🌡 *Lämpötila:*",
             f"  Min: {stats['temp_min']:.1f}°C",
             f"  Max: {stats['temp_max']:.1f}°C",
@@ -745,21 +756,35 @@ class CommandHandlers:
         # Parse arguments: /graph [sensor_identifier] [time]
         sensor_identifier: Optional[str] = None
         hours = 24
+        days: Optional[int] = None
 
         for arg in args:
             h, d = self._parse_time_arg(arg)
             if h is not None:
                 hours = h
+                days = None
             elif d is not None:
+                days = d
                 hours = d * 24
             else:
                 sensor_identifier = arg
+
+        # Dynamic width based on time range
+        if hours <= 24:
+            width = 24
+        elif hours <= 72:
+            width = 36
+        else:
+            width = 48
+
+        # Time string for display
+        time_str = f"{days}d" if days else f"{hours}h"
 
         if not sensor_identifier:
             weather_hint = " tai `/graph sää`" if self._weather else ""
             await update.effective_message.reply_text(
                 f"Käyttö: `/graph <anturi> [aika]`\n"
-                f"Esim: `/graph 1 24h` tai `/graph Olohuone 24h`{weather_hint}",
+                f"Esim: `/graph 1 24h`, `/graph 1 7d`{weather_hint}",
                 parse_mode="Markdown",
             )
             return
@@ -781,12 +806,12 @@ class CommandHandlers:
                 )
                 return
 
-            graph = self._create_ascii_graph(data, width=24, height=8)
+            graph, timeline = self._create_ascii_graph(data, width=width, height=8)
             temps = [t for _, t in data]
 
             text = (
-                f"🌤️ *{display_name}* ({hours}h)\n"
-                f"```\n{graph}```\n"
+                f"🌤️ *{display_name}* ({time_str}) ({_format_timestamp()})\n"
+                f"```\n{graph}\n{timeline}```\n"
                 f"Min: {min(temps):.1f}°C | Max: {max(temps):.1f}°C | Ka: {sum(temps)/len(temps):.1f}°C"
             )
 
@@ -810,12 +835,12 @@ class CommandHandlers:
             )
             return
 
-        graph = self._create_ascii_graph(data, width=24, height=8)
+        graph, timeline = self._create_ascii_graph(data, width=width, height=8)
         temps = [t for _, t in data]
 
         text = (
-            f"📈 *{display_name}* ({hours}h)\n"
-            f"```\n{graph}```\n"
+            f"📈 *{display_name}* ({time_str}) ({_format_timestamp()})\n"
+            f"```\n{graph}\n{timeline}```\n"
             f"Min: {min(temps):.1f}°C | Max: {max(temps):.1f}°C | Ka: {sum(temps)/len(temps):.1f}°C"
         )
 
@@ -826,11 +851,15 @@ class CommandHandlers:
         data: list[tuple[datetime, float]],
         width: int = 24,
         height: int = 8,
-    ) -> str:
-        """Create ASCII art graph from data points."""
-        if not data:
-            return "Ei dataa"
+    ) -> tuple[str, str]:
+        """Create ASCII art graph from data points.
 
+        Returns tuple of (graph_string, timeline_string).
+        """
+        if not data:
+            return "Ei dataa", ""
+
+        timestamps = [t for t, _ in data]
         temps = [t for _, t in data]
         min_temp = min(temps)
         max_temp = max(temps)
@@ -842,6 +871,8 @@ class CommandHandlers:
         # Sample data to fit width
         step = max(1, len(data) // width)
         sampled = [temps[i] for i in range(0, len(data), step)][:width]
+        sampled_times = [timestamps[i] for i in range(0, len(data), step)][:width]
+        actual_width = len(sampled)
 
         # Build graph
         lines = []
@@ -861,7 +892,34 @@ class CommandHandlers:
             else:
                 lines.append(f"      │{line}│")
 
-        return "\n".join(lines)
+        # Build timeline
+        if sampled_times:
+            first_time = sampled_times[0]
+            last_time = sampled_times[-1]
+            total_hours = (last_time - first_time).total_seconds() / 3600
+
+            if total_hours <= 24:
+                # Show hours
+                first_label = first_time.strftime("%H:%M")
+                last_label = last_time.strftime("%H:%M")
+            elif total_hours <= 168:
+                # Show dates for multi-day
+                first_label = first_time.strftime("%d.%m")
+                last_label = last_time.strftime("%d.%m")
+            else:
+                first_label = first_time.strftime("%d.%m")
+                last_label = last_time.strftime("%d.%m")
+
+            # Create timeline with labels at start and end
+            padding = actual_width - len(first_label) - len(last_label)
+            if padding > 0:
+                timeline = f"      └{first_label}{' ' * padding}{last_label}┘"
+            else:
+                timeline = f"      └{first_label}{'─' * (actual_width - len(first_label))}┘"
+        else:
+            timeline = ""
+
+        return "\n".join(lines), timeline
 
     async def weather(
         self,
@@ -892,7 +950,7 @@ class CommandHandlers:
         location = self._weather.location_name
 
         lines = [
-            f"{emoji} *{location} - Sää*\n",
+            f"{emoji} *{location} - Sää* ({_format_timestamp()})\n",
             f"🌡 *Lämpötila:* {w.temperature:.1f}°C",
         ]
 
@@ -1069,7 +1127,7 @@ Sää: `/graph sää 48h`
 
     async def _send_temps_with_buttons(self, query) -> None:
         """Send temperatures with navigation buttons."""
-        lines = ["🌡️ *Lämpötilat*\n"]
+        lines = [f"🌡️ *Lämpötilat* ({_format_timestamp()})\n"]
 
         if self._db:
             devices = self._get_devices_with_config_names()
@@ -1125,7 +1183,7 @@ Sää: `/graph sää 48h`
         location = self._weather.location_name
 
         lines = [
-            f"{emoji} *{location} - Sää*\n",
+            f"{emoji} *{location} - Sää* ({_format_timestamp()})\n",
             f"🌡 *Lämpötila:* {w.temperature:.1f}°C",
         ]
 
@@ -1170,7 +1228,7 @@ Sää: `/graph sää 48h`
             hours = int(time_arg.replace("h", ""))
 
         time_str = f"{days}d" if days else f"{hours}h"
-        lines = [f"📈 *Historia ({time_str})*\n"]
+        lines = [f"📈 *Historia ({time_str})* ({_format_timestamp()})\n"]
 
         if self._db:
             devices = self._get_devices_with_config_names()
@@ -1228,7 +1286,7 @@ Sää: `/graph sää 48h`
             hours = int(time_arg.replace("h", ""))
 
         time_str = f"{days}d" if days else f"{hours}h"
-        lines = [f"📊 *Tilastot ({time_str})*\n"]
+        lines = [f"📊 *Tilastot ({time_str})* ({_format_timestamp()})\n"]
 
         if self._db:
             devices = self._get_devices_with_config_names()
@@ -1285,7 +1343,7 @@ Sää: `/graph sää 48h`
 
     async def _send_status_response(self, query) -> None:
         """Send status with navigation buttons."""
-        lines = ["🔧 *Järjestelmän tila*\n"]
+        lines = [f"🔧 *Järjestelmän tila* ({_format_timestamp()})\n"]
         lines.append("*Anturit:*")
 
         if self._db:
@@ -1312,6 +1370,11 @@ Sää: `/graph sää 48h`
 
             total = len(devices)
             lines.append(f"\n*Yhteenveto:* {active}/{total} anturia aktiivisia")
+
+            # Uptime
+            uptime = datetime.now() - self._start_time
+            uptime_str = self._format_uptime(uptime)
+            lines.append(f"*Käynnissä:* {uptime_str}")
 
         keyboard = [
             [
@@ -1367,3 +1430,17 @@ Sää: `/graph sää 48h`
         else:
             hours = total_seconds // 3600
             return f"{hours}h sitten"
+
+    def _format_uptime(self, uptime: timedelta) -> str:
+        """Format uptime as human-readable string."""
+        total_seconds = int(uptime.total_seconds())
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        if days > 0:
+            return f"{days}pv {hours}h {minutes}min"
+        elif hours > 0:
+            return f"{hours}h {minutes}min"
+        else:
+            return f"{minutes}min"
