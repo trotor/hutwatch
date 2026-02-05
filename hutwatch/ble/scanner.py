@@ -128,7 +128,7 @@ class BleScanner:
         finally:
             self._scanner = None
 
-    def _reset_bluetooth_adapter(self) -> None:
+    async def _reset_bluetooth_adapter(self) -> None:
         """Reset Bluetooth adapter to recover from stuck state.
 
         Uses bluetoothctl (D-Bus) which works without sudo when user
@@ -136,17 +136,24 @@ class BleScanner:
         """
         # Try bluetoothctl first (works via D-Bus, no sudo needed)
         try:
-            # Power cycle the adapter
+            # Power off
             subprocess.run(
                 ["bluetoothctl", "power", "off"],
                 capture_output=True,
                 timeout=5,
             )
+            # Wait for adapter to power off
+            await asyncio.sleep(1)
+
+            # Power on
             subprocess.run(
                 ["bluetoothctl", "power", "on"],
                 capture_output=True,
                 timeout=5,
             )
+            # Wait for adapter to fully power on
+            await asyncio.sleep(2)
+
             logger.info("Bluetooth adapter power cycled via bluetoothctl")
             return
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
@@ -161,6 +168,7 @@ class BleScanner:
             )
             if result.returncode == 0:
                 logger.info("Bluetooth adapter reset via hciconfig")
+                await asyncio.sleep(2)  # Wait for adapter
             else:
                 logger.debug("hciconfig reset failed: %s", result.stderr.decode().strip())
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
@@ -227,8 +235,7 @@ class BleScanner:
 
                 # Reset adapter before starting (helps with stuck state)
                 if restart_count > 1:
-                    self._reset_bluetooth_adapter()
-                    await asyncio.sleep(2)  # Give adapter time to recover
+                    await self._reset_bluetooth_adapter()
 
                 # Create fresh scanner instance
                 self._scanner = await self._create_scanner()
@@ -281,8 +288,8 @@ class BleScanner:
                 await self._stop_scanner_safe()
 
                 # Error recovery - reset adapter and wait
-                self._reset_bluetooth_adapter()
-                await asyncio.sleep(5)
+                await self._reset_bluetooth_adapter()
+                await asyncio.sleep(3)
 
     async def run_forever(self) -> None:
         """Run scanner indefinitely (legacy method)."""
