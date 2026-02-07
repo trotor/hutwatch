@@ -9,8 +9,9 @@ description = "BLE temperature monitoring with Telegram bot"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "aiohttp>=3.9.0",
     "bleak>=0.21.0",
-    "python-telegram-bot>=20.0",
+    "python-telegram-bot[job-queue]>=20.0",
     "pyyaml>=6.0",
 ]
 
