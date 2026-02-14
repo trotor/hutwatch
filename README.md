@@ -2,6 +2,8 @@
 
 BLE-lämpötilaseuranta Telegram-botilla ja terminaalikäyttöliittymällä. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista, hakee ulkosään yr.no:sta ja lähettää tiedot Telegramiin tai näyttää ne ASCII-dashboardissa.
 
+![TUI Dashboard](resources/tui-dashboard.png)
+
 ## Ominaisuudet
 
 - RuuviTag (Data Format 3/5) tuki
@@ -121,6 +123,7 @@ Interaktiivinen ASCII-dashboard jossa:
 | `w <paikka>` | Aseta sääpaikka (esim. `w Toivala`) |
 | `w <lat> <lon>` | Aseta sää koordinaateilla |
 | `wr` | Päivitä sää heti |
+| `t` | Näytä/piilota status-osio |
 | `r` / Enter | Päivitä / takaisin dashboardiin |
 | `q` | Lopeta |
 
@@ -195,6 +198,88 @@ Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
 - Historia 1d / 7d / 30d
 - Tilastot 1d / 7d / 30d
 - Päivitä-nappi jokaisessa näkymässä
+
+## macOS: taustapalvelu ja työpöytäwidget
+
+### Taustaajo launchd:llä
+
+macOS:n natiivi palvelunhallinta. Käynnistyy automaattisesti kirjautumisen yhteydessä ja uudelleenkäynnistyy virheen sattuessa.
+
+1. Luo tiedosto `~/Library/LaunchAgents/com.hutwatch.agent.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hutwatch.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/teroronkko/code/hutwatch/venv/bin/python3</string>
+        <string>-m</string>
+        <string>hutwatch</string>
+        <string>-c</string>
+        <string>/Users/teroronkko/code/hutwatch/config.yaml</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/teroronkko/code/hutwatch</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/teroronkko/code/hutwatch/logs/hutwatch.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/teroronkko/code/hutwatch/logs/hutwatch.err</string>
+</dict>
+</plist>
+```
+
+2. Ota käyttöön:
+
+```bash
+mkdir -p logs
+launchctl load ~/Library/LaunchAgents/com.hutwatch.agent.plist
+```
+
+3. Hallinta:
+
+```bash
+# Tarkista tila
+launchctl list | grep hutwatch
+
+# Pysäytä
+launchctl unload ~/Library/LaunchAgents/com.hutwatch.agent.plist
+
+# Käynnistä uudelleen
+launchctl unload ~/Library/LaunchAgents/com.hutwatch.agent.plist
+launchctl load ~/Library/LaunchAgents/com.hutwatch.agent.plist
+
+# Lokien seuranta
+tail -f logs/hutwatch.log
+```
+
+### Übersicht-työpöytäwidget
+
+[Übersicht](https://tracesof.net/uebersicht/) on ilmainen macOS-sovellus, joka näyttää HTML/JS-widgettejä työpöydällä.
+
+1. Asenna Übersicht: https://tracesof.net/uebersicht/
+2. Kopioi widget:
+
+```bash
+cp -r widget/hutwatch.widget "$HOME/Library/Application Support/Übersicht/widgets/"
+```
+
+3. Muokkaa polut tiedostossa `index.jsx` (rivit 7-8) vastaamaan omaa asennustasi
+4. Widget päivittyy automaattisesti 30 sekunnin välein
+
+Widget-data tuotetaan komennolla:
+
+```bash
+./venv/bin/python -m hutwatch.widget_output -d hutwatch.db
+```
 
 ## Xiaomi-anturin firmware
 

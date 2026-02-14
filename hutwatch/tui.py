@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -65,6 +66,7 @@ class TuiDashboard:
     Commands (type + Enter):
       r / Enter  - refresh current view
       q          - quit
+      t          - toggle status section visibility
       h [period] - history (e.g. h, h 1d, h 7d)
       s [period] - stats (e.g. s, s 7d)
       d          - devices list
@@ -107,6 +109,7 @@ class TuiDashboard:
         self._graph_mac: Optional[str] = None  # for graph view
         self._graph_name: Optional[str] = None
         self._status_msg: Optional[str] = None  # one-shot feedback message
+        self._show_status: bool = True  # toggle with 't' command
 
     def set_weather(self, weather: WeatherFetcher) -> None:
         """Update weather fetcher reference (called by app after dynamic setup)."""
@@ -233,6 +236,12 @@ class TuiDashboard:
 
         if cmd == "r":
             # Refresh current view
+            return
+
+        if cmd == "t":
+            self._show_status = not self._show_status
+            state = "näkyvillä" if self._show_status else "piilotettu"
+            self._status_msg = f"Status-osio {state}"
             return
 
         if cmd == "h":
@@ -532,7 +541,7 @@ class TuiDashboard:
     def _render(self) -> None:
         """Render the current view."""
         cols = shutil.get_terminal_size().columns
-        cols = min(cols, 80)
+        cols = min(cols, 140)
 
         lines: list[str] = []
         self._render_header(lines, cols)
@@ -590,6 +599,7 @@ class TuiDashboard:
 
         if self._view == "dashboard":
             cmds = ["[h] historia", "[s] tilastot", "[d] laitteet", "[g <n>] graafi"]
+            cmds.append("[t] tila")
             cmds.append("[n <n> <nimi>] nimeä")
             cmds.append("[p <nimi>] paikka")
             if self._weather:
@@ -606,10 +616,270 @@ class TuiDashboard:
     # ── Dashboard view ────────────────────────────────────────────────
 
     def _render_dashboard(self, lines: list[str], cols: int) -> None:
-        """Render the main dashboard with temps, weather, and status."""
+        """Render the main dashboard with temps, weather, and status.
+
+        Wide layout (cols >= 110): sensors+summary on left, weather+status on right.
+        Narrow layout (< 110): stacked vertically as before.
+        """
         now = datetime.now()
         ordered_macs, device_map, readings = self._get_ordered_devices()
 
+        if cols >= 110:
+            self._render_dashboard_wide(lines, cols, now, ordered_macs, device_map, readings)
+        else:
+            self._render_dashboard_narrow(lines, cols, now, ordered_macs, device_map, readings)
+
+    def _render_sensor_lines(
+        self,
+        cols: int,
+        now: datetime,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+        readings: dict,
+    ) -> list[str]:
+        """Render sensor reading lines (without ANSI-aware padding)."""
+        result: list[str] = []
+        site_name = self._get_site_name()
+        section_title = f"Lämpötilat — {site_name}" if site_name else "Lämpötilat"
+        result.append(f"{BOLD}{section_title}{RESET}")
+
+        if not readings:
+            result.append(f"{DIM}Ei anturidataa vielä...{RESET}")
+        else:
+            for i, mac in enumerate(ordered_macs, 1):
+                reading = readings.get(mac)
+                device = device_map.get(mac)
+                name = device.get_display_name() if device else mac
+
+                if reading is None:
+                    result.append(f"{RED}✗{RESET} {i}. {name}: {DIM}ei yhteyttä{RESET}")
+                    continue
+
+                temp = f"{reading.temperature:.1f}°C"
+                humidity = (
+                    f"{reading.humidity:.0f}%"
+                    if reading.humidity is not None
+                    else ""
+                )
+                age = (now - reading.timestamp).total_seconds()
+                age_str = _format_age(age)
+
+                if age < 300:
+                    dot = f"{GREEN}●{RESET}"
+                elif age < 600:
+                    dot = f"{YELLOW}●{RESET}"
+                else:
+                    dot = f"{RED}●{RESET}"
+
+                parts = [f"{dot} {i}. {name}: {BOLD}{temp}{RESET}"]
+                if humidity:
+                    parts.append(humidity)
+                parts.append(f"{DIM}{age_str}{RESET}")
+                result.append("  ".join(parts))
+
+        return result
+
+    def _render_24h_summary_lines(
+        self,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+    ) -> list[str]:
+        """Render 24h summary as standalone lines (no leading indent)."""
+        result: list[str] = []
+        has_stats = False
+
+        for i, mac in enumerate(ordered_macs, 1):
+            stats = self._db.get_stats(mac, hours=24)
+            if not stats:
+                continue
+            if not has_stats:
+                has_stats = True
+                result.append("")
+                result.append(f"{BOLD}24h yhteenveto{RESET}")
+
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+            result.append(
+                f"{i}. {name}: "
+                f"min {stats['temp_min']:.1f}, "
+                f"max {stats['temp_max']:.1f}, "
+                f"ka {stats['temp_avg']:.1f}°C"
+            )
+
+        if self._weather:
+            w_stats = self._db.get_weather_stats(hours=24)
+            if w_stats:
+                location = self._weather.location_name
+                line = (
+                    f"{location}: "
+                    f"min {w_stats['temp_min']:.1f}, "
+                    f"max {w_stats['temp_max']:.1f}, "
+                    f"ka {w_stats['temp_avg']:.1f}°C"
+                )
+                if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
+                    line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                result.append(line)
+
+        return result
+
+    def _render_weather_lines(self, now: datetime) -> list[str]:
+        """Render weather as standalone lines (no leading indent)."""
+        result: list[str] = []
+        if not self._weather:
+            return result
+        weather = self._weather.latest
+        if not weather:
+            return result
+
+        emoji = get_weather_emoji(weather.symbol_code)
+        location = self._weather.location_name
+
+        last_fetch = self._weather.last_fetch
+        if last_fetch:
+            age = (now - last_fetch).total_seconds()
+            fetch_str = f" {DIM}({_format_age(age)} sitten){RESET}"
+        else:
+            fetch_str = ""
+
+        result.append(f"{BOLD}{emoji} {location}{RESET}{fetch_str}")
+
+        result.append(f"Lämpötila:   {BOLD}{weather.temperature:.1f}°C{RESET}")
+        if weather.humidity is not None:
+            result.append(f"Kosteus:     {weather.humidity:.0f}%")
+        if weather.wind_speed is not None:
+            wind_dir = _wind_direction_text(weather.wind_direction)
+            wind = f"{weather.wind_speed:.1f} m/s"
+            if wind_dir:
+                wind += f" {wind_dir}"
+            result.append(f"Tuuli:       {wind}")
+        if weather.pressure is not None:
+            result.append(f"Ilmanpaine:  {weather.pressure:.0f} hPa")
+        if weather.precipitation is not None and weather.precipitation > 0:
+            result.append(f"Sade (1h):   {weather.precipitation:.1f} mm")
+        if weather.cloud_cover is not None:
+            result.append(f"Pilvisyys:   {weather.cloud_cover:.0f}%")
+
+        return result
+
+    def _render_status_lines(
+        self,
+        now: datetime,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+        readings: dict,
+    ) -> list[str]:
+        """Render status section as standalone lines (no leading indent)."""
+        if not self._show_status:
+            return []
+
+        result: list[str] = []
+        result.append("")
+        result.append(f"{BOLD}Status{RESET}")
+
+        active = 0
+        total = len(ordered_macs)
+        for mac in ordered_macs:
+            reading = readings.get(mac)
+            if reading:
+                age = (now - reading.timestamp).total_seconds()
+                if age < 600:
+                    active += 1
+
+        if total > 0:
+            result.append(f"Anturit:     {active}/{total} aktiivista")
+        else:
+            result.append(f"Anturit:     {DIM}ei konfiguroitu{RESET}")
+
+        for mac in ordered_macs:
+            reading = readings.get(mac)
+            if reading is None:
+                continue
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+            parts = [f"  {name}:"]
+            if reading.rssi is not None:
+                parts.append(f"RSSI {reading.rssi} dBm")
+            if reading.battery_percent is not None:
+                parts.append(f"akku {reading.battery_percent}%")
+            elif reading.battery_voltage is not None:
+                parts.append(f"akku {reading.battery_voltage:.2f}V")
+            if len(parts) > 1:
+                result.append(", ".join(parts))
+
+        uptime = now - self._start_time
+        total_secs = int(uptime.total_seconds())
+        days = total_secs // 86400
+        hours = (total_secs % 86400) // 3600
+        mins = (total_secs % 3600) // 60
+
+        if days > 0:
+            uptime_str = f"{days}pv {hours}h {mins}min"
+        elif hours > 0:
+            uptime_str = f"{hours}h {mins}min"
+        else:
+            uptime_str = f"{mins}min"
+
+        result.append(f"Käynnissä:   {uptime_str}")
+        return result
+
+    @staticmethod
+    def _visible_len(s: str) -> int:
+        """Calculate visible length of a string (excluding ANSI escape codes)."""
+        return len(re.sub(r'\033\[[0-9;]*m', '', s))
+
+    def _render_side_by_side(
+        self,
+        left_lines: list[str],
+        right_lines: list[str],
+        cols: int,
+    ) -> list[str]:
+        """Merge two lists of lines side by side with a vertical separator."""
+        col_width = (cols - 3) // 2  # 3 chars for " │ " separator
+        result: list[str] = []
+        max_rows = max(len(left_lines), len(right_lines))
+
+        for i in range(max_rows):
+            left = left_lines[i] if i < len(left_lines) else ""
+            right = right_lines[i] if i < len(right_lines) else ""
+
+            # Pad left side to col_width (accounting for ANSI codes)
+            visible = self._visible_len(left)
+            padding = max(col_width - visible, 0)
+            result.append(f"  {left}{' ' * padding} │ {right}")
+
+        return result
+
+    def _render_dashboard_wide(
+        self,
+        lines: list[str],
+        cols: int,
+        now: datetime,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+        readings: dict,
+    ) -> None:
+        """Render dashboard in wide two-column layout (cols >= 110)."""
+        # Left column: sensors + 24h summary
+        left = self._render_sensor_lines(cols, now, ordered_macs, device_map, readings)
+        left.extend(self._render_24h_summary_lines(ordered_macs, device_map))
+
+        # Right column: weather + status
+        right = self._render_weather_lines(now)
+        right.extend(self._render_status_lines(now, ordered_macs, device_map, readings))
+
+        lines.append("")
+        lines.extend(self._render_side_by_side(left, right, cols))
+
+    def _render_dashboard_narrow(
+        self,
+        lines: list[str],
+        cols: int,
+        now: datetime,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+        readings: dict,
+    ) -> None:
+        """Render dashboard in narrow stacked layout (cols < 110)."""
         # Sensor readings
         site_name = self._get_site_name()
         section_title = f"Lämpötilat — {site_name}" if site_name else "Lämpötilat"
@@ -660,7 +930,8 @@ class TuiDashboard:
         self._render_weather(lines, cols)
 
         # Status
-        self._render_status(lines, cols, ordered_macs, device_map, readings, now)
+        if self._show_status:
+            self._render_status(lines, cols, ordered_macs, device_map, readings, now)
 
     def _render_24h_summary(
         self,
