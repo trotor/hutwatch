@@ -13,6 +13,7 @@ from typing import Optional
 
 from .ble.sensor_store import SensorStore
 from .db import Database
+from .i18n import t, wind_direction_text
 from .models import AppConfig, DeviceInfo
 from .weather import WeatherFetcher, get_weather_emoji
 
@@ -31,26 +32,14 @@ RED = "\033[31m"
 AUTO_REFRESH_SECONDS = 10
 
 
-def _wind_direction_text(degrees: Optional[float]) -> str:
-    """Convert wind direction degrees to Finnish text."""
-    if degrees is None:
-        return ""
-    directions = [
-        "pohjoisesta", "koillisesta", "idästä", "kaakosta",
-        "etelästä", "lounaasta", "lännestä", "luoteesta",
-    ]
-    index = int((degrees + 22.5) / 45) % 8
-    return directions[index]
-
-
 def _format_age(seconds: float) -> str:
     """Format age in seconds to human-readable string."""
     if seconds < 60:
-        return f"{seconds:.0f}s"
+        return t("time_short_seconds", n=int(seconds))
     elif seconds < 3600:
-        return f"{seconds / 60:.0f}min"
+        return t("time_short_minutes", n=int(seconds / 60))
     else:
-        return f"{seconds / 3600:.0f}h"
+        return t("time_short_hours", n=int(seconds / 3600))
 
 
 class TuiDashboard:
@@ -198,27 +187,27 @@ class TuiDashboard:
                     lat, lon, display_name = result
                     try:
                         await self._app.setup_weather(lat, lon, display_name)
-                        self._status_msg = f"Sää asetettu: {display_name} ({lat:.4f}, {lon:.4f})"
+                        self._status_msg = t("tui_weather_set", name=display_name, lat=f"{lat:.4f}", lon=f"{lon:.4f}")
                     except Exception as e:
-                        self._status_msg = f"Virhe sään asetuksessa: {e}"
+                        self._status_msg = t("tui_weather_set_error", error=e)
                 # else: error status already set by _geocode
 
             if self._pending_weather_refresh:
                 self._pending_weather_refresh = False
                 try:
                     ok = await self._app.refresh_weather()
-                    self._status_msg = "Sää päivitetty" if ok else "Sään päivitys epäonnistui"
+                    self._status_msg = t("tui_weather_refreshed") if ok else t("tui_weather_refresh_failed")
                 except Exception as e:
-                    self._status_msg = f"Virhe: {e}"
+                    self._status_msg = t("tui_weather_error", error=e)
 
             elif self._pending_weather:
                 lat, lon, name = self._pending_weather
                 self._pending_weather = None
                 try:
                     await self._app.setup_weather(lat, lon, name)
-                    self._status_msg = f"Sää asetettu: {name} ({lat}, {lon})"
+                    self._status_msg = t("tui_weather_set", name=name, lat=lat, lon=lon)
                 except Exception as e:
-                    self._status_msg = f"Virhe sään asetuksessa: {e}"
+                    self._status_msg = t("tui_weather_set_error", error=e)
 
     # ── Command handling ──────────────────────────────────────────────
 
@@ -240,8 +229,7 @@ class TuiDashboard:
 
         if cmd == "t":
             self._show_status = not self._show_status
-            state = "näkyvillä" if self._show_status else "piilotettu"
-            self._status_msg = f"Status-osio {state}"
+            self._status_msg = t("tui_status_toggle_visible") if self._show_status else t("tui_status_toggle_hidden")
             return
 
         if cmd == "h":
@@ -283,12 +271,12 @@ class TuiDashboard:
         if cmd == "wr":
             if self._weather and self._app:
                 self._pending_weather_refresh = True
-                self._status_msg = "Päivitetään sää..."
+                self._status_msg = t("tui_weather_refreshing")
             else:
-                self._status_msg = "Sää ei käytössä"
+                self._status_msg = t("tui_weather_not_available")
             return
 
-        self._status_msg = f"Tuntematon komento: {cmd}"
+        self._status_msg = t("tui_unknown_command", cmd=cmd)
 
     def _parse_time_arg(self, arg: str) -> None:
         """Parse time argument like '6', '6h', '7d' into _view_hours/_view_days."""
@@ -315,17 +303,17 @@ class TuiDashboard:
     def _handle_graph_cmd(self, args: list[str]) -> None:
         """Handle graph command: g <sensor_num> [period]."""
         if not args:
-            self._status_msg = "Kaytto: g <anturi> [aika]  (esim. g 1, g 1 7d, g saa)"
+            self._status_msg = t("tui_graph_usage")
             return
 
         # Check for weather graph
         if args[0].lower() in ("saa", "sää", "weather"):
             if not self._weather:
-                self._status_msg = "Saa ei kaytossa"
+                self._status_msg = t("tui_graph_weather_not_available")
                 return
             self._view = "graph"
             self._graph_mac = None
-            self._graph_name = self._weather.location_name if self._weather else "Saa"
+            self._graph_name = self._weather.location_name if self._weather else t("common_weather_default_name")
             self._view_hours = 24
             self._view_days = None
             if len(args) > 1:
@@ -334,7 +322,7 @@ class TuiDashboard:
 
         device = self._resolve_device(args[0])
         if not device:
-            self._status_msg = f"Anturia '{args[0]}' ei loytynyt"
+            self._status_msg = t("tui_sensor_not_found", identifier=args[0])
             return
 
         self._view = "graph"
@@ -348,12 +336,12 @@ class TuiDashboard:
     def _handle_rename_cmd(self, args: list[str]) -> None:
         """Handle rename command: n <device_num> <new_name> or n <device_num> -."""
         if len(args) < 2:
-            self._status_msg = "Kaytto: n <nro> <nimi>  tai  n <nro> -  (tyhjenna)"
+            self._status_msg = t("tui_rename_usage")
             return
 
         device = self._resolve_device(args[0])
         if not device:
-            self._status_msg = f"Anturia '{args[0]}' ei loytynyt"
+            self._status_msg = t("tui_sensor_not_found", identifier=args[0])
             return
 
         new_name = " ".join(args[1:])
@@ -361,29 +349,29 @@ class TuiDashboard:
             # Clear alias
             self._db.set_device_alias(device.mac, None)
             old_name = device.get_display_name()
-            self._status_msg = f"Alias poistettu: {old_name}"
+            self._status_msg = t("tui_rename_alias_cleared", name=old_name)
         else:
             old_name = device.get_display_name()
             self._db.set_device_alias(device.mac, new_name)
-            self._status_msg = f"Nimetty uudelleen: {old_name} -> {new_name}"
+            self._status_msg = t("tui_rename_success", old=old_name, new=new_name)
 
     def _handle_site_name_cmd(self, args: list[str]) -> None:
         """Handle site name command: p <name> or p - (clear)."""
         if not args:
             current = self._get_site_name()
             if current:
-                self._status_msg = f"Paikan nimi: {current}  (tyhjennä: p -)"
+                self._status_msg = t("tui_site_name_current", name=current)
             else:
-                self._status_msg = "Käyttö: p <nimi>  (esim. p Mökki Toivalassa)"
+                self._status_msg = t("tui_site_name_usage")
             return
 
         name = " ".join(args)
         if name == "-":
             self._db.set_setting("site_name", "")
-            self._status_msg = "Paikan nimi poistettu"
+            self._status_msg = t("tui_site_name_cleared")
         else:
             self._db.set_setting("site_name", name)
-            self._status_msg = f"Paikan nimi asetettu: {name}"
+            self._status_msg = t("tui_site_name_set", name=name)
 
     def _handle_weather_cmd(self, args: list[str]) -> None:
         """Handle weather location command.
@@ -393,14 +381,11 @@ class TuiDashboard:
           w <place name>        - search by place name (geocoding)
         """
         if not self._app:
-            self._status_msg = "Sään asetus ei tuettu tässä tilassa"
+            self._status_msg = t("tui_weather_cmd_not_supported")
             return
 
         if not args:
-            self._status_msg = (
-                "Käyttö: w <paikka>  tai  w <lat> <lon> [nimi]\n"
-                "  Esim: w Toivala  tai  w 62.99 27.73 Toivala"
-            )
+            self._status_msg = t("tui_weather_cmd_usage")
             return
 
         # Try to parse first two args as coordinates
@@ -409,9 +394,9 @@ class TuiDashboard:
                 lat = float(args[0])
                 lon = float(args[1])
                 if (-90 <= lat <= 90) and (-180 <= lon <= 180):
-                    name = " ".join(args[2:]) if len(args) > 2 else "Sää"
+                    name = " ".join(args[2:]) if len(args) > 2 else t("common_weather_default_name")
                     self._pending_weather = (lat, lon, name)
-                    self._status_msg = f"Asetetaan sää: {name}..."
+                    self._status_msg = t("tui_weather_setting", name=name)
                     return
             except ValueError:
                 pass  # Not coordinates, treat as place name
@@ -419,7 +404,7 @@ class TuiDashboard:
         # Place name search via geocoding
         query = " ".join(args)
         self._pending_geocode = query
-        self._status_msg = f"Haetaan paikkaa: {query}..."
+        self._status_msg = t("tui_weather_searching", query=query)
 
     async def _geocode(self, query: str) -> Optional[tuple[float, float, str]]:
         """Geocode a place name using Nominatim (OpenStreetMap).
@@ -441,12 +426,12 @@ class TuiDashboard:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
-                        self._status_msg = f"Geokoodaus epäonnistui (HTTP {resp.status})"
+                        self._status_msg = t("tui_geocode_failed", status=resp.status)
                         return None
                     results = await resp.json()
 
             if not results:
-                self._status_msg = f"Paikkaa '{query}' ei löytynyt"
+                self._status_msg = t("tui_geocode_not_found", query=query)
                 return None
 
             result = results[0]
@@ -464,7 +449,7 @@ class TuiDashboard:
             return lat, lon, short_name
 
         except Exception as e:
-            self._status_msg = f"Geokoodausvirhe: {e}"
+            self._status_msg = t("tui_geocode_error", error=e)
             return None
 
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
@@ -571,14 +556,15 @@ class TuiDashboard:
     def _render_header(self, lines: list[str], cols: int) -> None:
         """Render common header."""
         now = datetime.now()
+        from . import __version__
         site_name = self._get_site_name()
-        title = f"HutWatch — {site_name}" if site_name else "HutWatch"
+        title = f"HutWatch v{__version__} — {site_name}" if site_name else f"HutWatch v{__version__}"
         view_label = {
             "dashboard": "",
-            "history": f" / Historia ({self._time_str()})",
-            "stats": f" / Tilastot ({self._time_str()})",
-            "devices": " / Laitteet",
-            "graph": f" / Graafi ({self._time_str()})",
+            "history": f" / {t('tui_view_history')} ({self._time_str()})",
+            "stats": f" / {t('tui_view_stats')} ({self._time_str()})",
+            "devices": f" / {t('tui_view_devices')}",
+            "graph": f" / {t('tui_view_graph')} ({self._time_str()})",
         }.get(self._view, "")
 
         timestamp = now.strftime("%d.%m. %H:%M:%S")
@@ -598,18 +584,18 @@ class TuiDashboard:
             lines.append(f"  {YELLOW}{self._status_msg}{RESET}")
 
         if self._view == "dashboard":
-            cmds = ["[h] historia", "[s] tilastot", "[d] laitteet", "[g <n>] graafi"]
-            cmds.append("[t] tila")
-            cmds.append("[n <n> <nimi>] nimeä")
-            cmds.append("[p <nimi>] paikka")
+            cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph")]
+            cmds.append(t("tui_cmd_status_toggle"))
+            cmds.append(t("tui_cmd_rename"))
+            cmds.append(t("tui_cmd_site_name"))
             if self._weather:
-                cmds.append("[wr] päivitä sää")
+                cmds.append(t("tui_cmd_weather_refresh"))
             else:
-                cmds.append("[w <paikka>] sää")
-            cmds.append("[q] lopeta")
+                cmds.append(t("tui_cmd_weather_set"))
+            cmds.append(t("tui_cmd_quit"))
             help_line = "  ".join(cmds)
         else:
-            help_line = "[Enter] dashboard  [r] päivitä  [q] lopeta"
+            help_line = t("tui_cmd_back")
 
         lines.append(f"  {DIM}{help_line}{RESET}")
 
@@ -640,11 +626,11 @@ class TuiDashboard:
         """Render sensor reading lines (without ANSI-aware padding)."""
         result: list[str] = []
         site_name = self._get_site_name()
-        section_title = f"Lämpötilat — {site_name}" if site_name else "Lämpötilat"
+        section_title = f"{t('tui_temperatures')} — {site_name}" if site_name else t("tui_temperatures")
         result.append(f"{BOLD}{section_title}{RESET}")
 
         if not readings:
-            result.append(f"{DIM}Ei anturidataa vielä...{RESET}")
+            result.append(f"{DIM}{t('tui_no_sensor_data')}{RESET}")
         else:
             for i, mac in enumerate(ordered_macs, 1):
                 reading = readings.get(mac)
@@ -652,7 +638,7 @@ class TuiDashboard:
                 name = device.get_display_name() if device else mac
 
                 if reading is None:
-                    result.append(f"{RED}✗{RESET} {i}. {name}: {DIM}ei yhteyttä{RESET}")
+                    result.append(f"{RED}✗{RESET} {i}. {name}: {DIM}{t('common_no_connection')}{RESET}")
                     continue
 
                 temp = f"{reading.temperature:.1f}°C"
@@ -695,7 +681,7 @@ class TuiDashboard:
             if not has_stats:
                 has_stats = True
                 result.append("")
-                result.append(f"{BOLD}24h yhteenveto{RESET}")
+                result.append(f"{BOLD}{t('tui_24h_summary')}{RESET}")
 
             device = device_map.get(mac)
             name = device.get_display_name() if device else mac
@@ -703,7 +689,7 @@ class TuiDashboard:
                 f"{i}. {name}: "
                 f"min {stats['temp_min']:.1f}, "
                 f"max {stats['temp_max']:.1f}, "
-                f"ka {stats['temp_avg']:.1f}°C"
+                f"{t('common_avg_abbr')} {stats['temp_avg']:.1f}°C"
             )
 
         if self._weather:
@@ -714,10 +700,10 @@ class TuiDashboard:
                     f"{location}: "
                     f"min {w_stats['temp_min']:.1f}, "
                     f"max {w_stats['temp_max']:.1f}, "
-                    f"ka {w_stats['temp_avg']:.1f}°C"
+                    f"{t('common_avg_abbr')} {w_stats['temp_avg']:.1f}°C"
                 )
                 if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
-                    line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                    line += f", {t('common_precipitation')} {w_stats['precipitation_total']:.1f} mm"
                 result.append(line)
 
         return result
@@ -737,27 +723,33 @@ class TuiDashboard:
         last_fetch = self._weather.last_fetch
         if last_fetch:
             age = (now - last_fetch).total_seconds()
-            fetch_str = f" {DIM}({_format_age(age)} sitten){RESET}"
+            fetch_str = f" {DIM}({t('time_ago_suffix', age=_format_age(age))}){RESET}"
         else:
             fetch_str = ""
 
         result.append(f"{BOLD}{emoji} {location}{RESET}{fetch_str}")
 
-        result.append(f"Lämpötila:   {BOLD}{weather.temperature:.1f}°C{RESET}")
+        label = f"{t('weather_temperature')}:"
+        result.append(f"{label:<13}{BOLD}{weather.temperature:.1f}°C{RESET}")
         if weather.humidity is not None:
-            result.append(f"Kosteus:     {weather.humidity:.0f}%")
+            label = f"{t('weather_humidity')}:"
+            result.append(f"{label:<13}{weather.humidity:.0f}%")
         if weather.wind_speed is not None:
-            wind_dir = _wind_direction_text(weather.wind_direction)
+            wind_dir = wind_direction_text(weather.wind_direction)
             wind = f"{weather.wind_speed:.1f} m/s"
             if wind_dir:
                 wind += f" {wind_dir}"
-            result.append(f"Tuuli:       {wind}")
+            label = f"{t('weather_wind')}:"
+            result.append(f"{label:<13}{wind}")
         if weather.pressure is not None:
-            result.append(f"Ilmanpaine:  {weather.pressure:.0f} hPa")
+            label = f"{t('weather_pressure')}:"
+            result.append(f"{label:<13}{weather.pressure:.0f} hPa")
         if weather.precipitation is not None and weather.precipitation > 0:
-            result.append(f"Sade (1h):   {weather.precipitation:.1f} mm")
+            label = f"{t('weather_precipitation_1h')}:"
+            result.append(f"{label:<13}{weather.precipitation:.1f} mm")
         if weather.cloud_cover is not None:
-            result.append(f"Pilvisyys:   {weather.cloud_cover:.0f}%")
+            label = f"{t('weather_cloud_cover')}:"
+            result.append(f"{label:<13}{weather.cloud_cover:.0f}%")
 
         return result
 
@@ -774,7 +766,7 @@ class TuiDashboard:
 
         result: list[str] = []
         result.append("")
-        result.append(f"{BOLD}Status{RESET}")
+        result.append(f"{BOLD}{t('tui_status_label')}{RESET}")
 
         active = 0
         total = len(ordered_macs)
@@ -785,10 +777,11 @@ class TuiDashboard:
                 if age < 600:
                     active += 1
 
+        sensors_label = t('tui_sensors_label')
         if total > 0:
-            result.append(f"Anturit:     {active}/{total} aktiivista")
+            result.append(f"{sensors_label:<13}{t('tui_sensors_active', active=active, total=total)}")
         else:
-            result.append(f"Anturit:     {DIM}ei konfiguroitu{RESET}")
+            result.append(f"{sensors_label:<13}{DIM}{t('tui_sensors_not_configured')}{RESET}")
 
         for mac in ordered_macs:
             reading = readings.get(mac)
@@ -800,9 +793,9 @@ class TuiDashboard:
             if reading.rssi is not None:
                 parts.append(f"RSSI {reading.rssi} dBm")
             if reading.battery_percent is not None:
-                parts.append(f"akku {reading.battery_percent}%")
+                parts.append(f"{t('tui_battery')} {reading.battery_percent}%")
             elif reading.battery_voltage is not None:
-                parts.append(f"akku {reading.battery_voltage:.2f}V")
+                parts.append(f"{t('tui_battery')} {reading.battery_voltage:.2f}V")
             if len(parts) > 1:
                 result.append(", ".join(parts))
 
@@ -813,13 +806,14 @@ class TuiDashboard:
         mins = (total_secs % 3600) // 60
 
         if days > 0:
-            uptime_str = f"{days}pv {hours}h {mins}min"
+            uptime_str = t("time_uptime_dhm", d=days, h=hours, m=mins)
         elif hours > 0:
-            uptime_str = f"{hours}h {mins}min"
+            uptime_str = t("time_uptime_hm", h=hours, m=mins)
         else:
-            uptime_str = f"{mins}min"
+            uptime_str = t("time_uptime_m", m=mins)
 
-        result.append(f"Käynnissä:   {uptime_str}")
+        uptime_label = t('tui_uptime_label')
+        result.append(f"{uptime_label:<13}{uptime_str}")
         return result
 
     @staticmethod
@@ -882,13 +876,13 @@ class TuiDashboard:
         """Render dashboard in narrow stacked layout (cols < 110)."""
         # Sensor readings
         site_name = self._get_site_name()
-        section_title = f"Lämpötilat — {site_name}" if site_name else "Lämpötilat"
+        section_title = f"{t('tui_temperatures')} — {site_name}" if site_name else t("tui_temperatures")
         lines.append("")
         lines.append(f"{BOLD}  {section_title}{RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         if not readings:
-            lines.append(f"  {DIM}Ei anturidataa vielä...{RESET}")
+            lines.append(f"  {DIM}{t('tui_no_sensor_data')}{RESET}")
         else:
             for i, mac in enumerate(ordered_macs, 1):
                 reading = readings.get(mac)
@@ -897,7 +891,7 @@ class TuiDashboard:
 
                 if reading is None:
                     lines.append(
-                        f"  {RED}✗{RESET} {i}. {name}: {DIM}ei yhteyttä{RESET}"
+                        f"  {RED}✗{RESET} {i}. {name}: {DIM}{t('common_no_connection')}{RESET}"
                     )
                     continue
 
@@ -951,7 +945,7 @@ class TuiDashboard:
             if not has_stats:
                 has_stats = True
                 stat_lines.append("")
-                stat_lines.append(f"{BOLD}  24h yhteenveto{RESET}")
+                stat_lines.append(f"{BOLD}  {t('tui_24h_summary')}{RESET}")
                 stat_lines.append(f"  {'-' * (cols - 4)}")
 
             device = device_map.get(mac)
@@ -960,7 +954,7 @@ class TuiDashboard:
                 f"  {i}. {name}: "
                 f"min {stats['temp_min']:.1f}°C, "
                 f"max {stats['temp_max']:.1f}°C, "
-                f"ka {stats['temp_avg']:.1f}°C"
+                f"{t('common_avg_abbr')} {stats['temp_avg']:.1f}°C"
             )
 
         # Weather 24h stats
@@ -972,10 +966,10 @@ class TuiDashboard:
                     f"  {location}: "
                     f"min {w_stats['temp_min']:.1f}°C, "
                     f"max {w_stats['temp_max']:.1f}°C, "
-                    f"ka {w_stats['temp_avg']:.1f}°C"
+                    f"{t('common_avg_abbr')} {w_stats['temp_avg']:.1f}°C"
                 )
                 if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
-                    stat_line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                    stat_line += f", {t('common_precipitation')} {w_stats['precipitation_total']:.1f} mm"
                 stat_lines.append(stat_line)
 
         if has_stats:
@@ -996,7 +990,7 @@ class TuiDashboard:
         last_fetch = self._weather.last_fetch
         if last_fetch:
             age = (datetime.now() - last_fetch).total_seconds()
-            fetch_str = f" {DIM}(haettu {_format_age(age)} sitten){RESET}"
+            fetch_str = f" {DIM}({t('time_fetched_ago', age=_format_age(age))}){RESET}"
         else:
             fetch_str = ""
 
@@ -1004,26 +998,32 @@ class TuiDashboard:
         lines.append(f"{BOLD}  {emoji} {location}{RESET}{fetch_str}")
         lines.append(f"  {'-' * (cols - 4)}")
 
-        lines.append(f"  Lämpötila:   {BOLD}{weather.temperature:.1f}°C{RESET}")
+        label = f"{t('weather_temperature')}:"
+        lines.append(f"  {label:<13}{BOLD}{weather.temperature:.1f}°C{RESET}")
 
         if weather.humidity is not None:
-            lines.append(f"  Kosteus:     {weather.humidity:.0f}%")
+            label = f"{t('weather_humidity')}:"
+            lines.append(f"  {label:<13}{weather.humidity:.0f}%")
 
         if weather.wind_speed is not None:
-            wind_dir = _wind_direction_text(weather.wind_direction)
+            wind_dir = wind_direction_text(weather.wind_direction)
             wind = f"{weather.wind_speed:.1f} m/s"
             if wind_dir:
                 wind += f" {wind_dir}"
-            lines.append(f"  Tuuli:       {wind}")
+            label = f"{t('weather_wind')}:"
+            lines.append(f"  {label:<13}{wind}")
 
         if weather.pressure is not None:
-            lines.append(f"  Ilmanpaine:  {weather.pressure:.0f} hPa")
+            label = f"{t('weather_pressure')}:"
+            lines.append(f"  {label:<13}{weather.pressure:.0f} hPa")
 
         if weather.precipitation is not None and weather.precipitation > 0:
-            lines.append(f"  Sade (1h):   {weather.precipitation:.1f} mm")
+            label = f"{t('weather_precipitation_1h')}:"
+            lines.append(f"  {label:<13}{weather.precipitation:.1f} mm")
 
         if weather.cloud_cover is not None:
-            lines.append(f"  Pilvisyys:   {weather.cloud_cover:.0f}%")
+            label = f"{t('weather_cloud_cover')}:"
+            lines.append(f"  {label:<13}{weather.cloud_cover:.0f}%")
 
     def _render_status(
         self,
@@ -1036,7 +1036,7 @@ class TuiDashboard:
     ) -> None:
         """Render status section with connectivity and uptime."""
         lines.append("")
-        lines.append(f"{BOLD}  Status{RESET}")
+        lines.append(f"{BOLD}  {t('tui_status_label')}{RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         active = 0
@@ -1048,10 +1048,11 @@ class TuiDashboard:
                 if age < 600:
                     active += 1
 
+        sensors_label = t('tui_sensors_label')
         if total > 0:
-            lines.append(f"  Anturit:     {active}/{total} aktiivista")
+            lines.append(f"  {sensors_label:<13}{t('tui_sensors_active', active=active, total=total)}")
         else:
-            lines.append(f"  Anturit:     {DIM}ei konfiguroitu{RESET}")
+            lines.append(f"  {sensors_label:<13}{DIM}{t('tui_sensors_not_configured')}{RESET}")
 
         for mac in ordered_macs:
             reading = readings.get(mac)
@@ -1063,9 +1064,9 @@ class TuiDashboard:
             if reading.rssi is not None:
                 parts.append(f"RSSI {reading.rssi} dBm")
             if reading.battery_percent is not None:
-                parts.append(f"akku {reading.battery_percent}%")
+                parts.append(f"{t('tui_battery')} {reading.battery_percent}%")
             elif reading.battery_voltage is not None:
-                parts.append(f"akku {reading.battery_voltage:.2f}V")
+                parts.append(f"{t('tui_battery')} {reading.battery_voltage:.2f}V")
             if len(parts) > 1:
                 lines.append(", ".join(parts))
 
@@ -1077,13 +1078,14 @@ class TuiDashboard:
         mins = (total_secs % 3600) // 60
 
         if days > 0:
-            uptime_str = f"{days}pv {hours}h {mins}min"
+            uptime_str = t("time_uptime_dhm", d=days, h=hours, m=mins)
         elif hours > 0:
-            uptime_str = f"{hours}h {mins}min"
+            uptime_str = t("time_uptime_hm", h=hours, m=mins)
         else:
-            uptime_str = f"{mins}min"
+            uptime_str = t("time_uptime_m", m=mins)
 
-        lines.append(f"  Käynnissä:   {uptime_str}")
+        uptime_label = t('tui_uptime_label')
+        lines.append(f"  {uptime_label:<13}{uptime_str}")
 
     # ── History view ──────────────────────────────────────────────────
 
@@ -1092,7 +1094,7 @@ class TuiDashboard:
         ordered_macs, device_map, readings = self._get_ordered_devices()
 
         lines.append("")
-        lines.append(f"{BOLD}  Historia ({self._time_str()}){RESET}")
+        lines.append(f"{BOLD}  {t('tui_view_history')} ({self._time_str()}){RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         hours = self._effective_hours()
@@ -1111,8 +1113,8 @@ class TuiDashboard:
                         f"  {i}. {BOLD}{name}{RESET}: "
                         f"min {min(temps):.1f}°C, "
                         f"max {max(temps):.1f}°C, "
-                        f"ka {sum(temps)/len(temps):.1f}°C "
-                        f"{DIM}({len(temps)} lukemaa){RESET}"
+                        f"{t('common_avg_abbr')} {sum(temps)/len(temps):.1f}°C "
+                        f"{DIM}({t('tui_history_readings', n=len(temps))}){RESET}"
                     )
                     has_data = True
                     continue
@@ -1128,13 +1130,13 @@ class TuiDashboard:
                     f"  {i}. {BOLD}{name}{RESET}: "
                     f"min {stats['temp_min']:.1f}°C, "
                     f"max {stats['temp_max']:.1f}°C, "
-                    f"ka {stats['temp_avg']:.1f}°C "
-                    f"{DIM}({stats['sample_count']} datapistettä){RESET}"
+                    f"{t('common_avg_abbr')} {stats['temp_avg']:.1f}°C "
+                    f"{DIM}({t('tui_history_datapoints', n=stats['sample_count'])}){RESET}"
                 )
                 has_data = True
             else:
                 lines.append(
-                    f"  {i}. {name}: {DIM}ei dataa{RESET}"
+                    f"  {i}. {name}: {DIM}{t('common_no_data')}{RESET}"
                 )
 
         # Weather history
@@ -1149,18 +1151,18 @@ class TuiDashboard:
                     f"  {get_weather_emoji(None)} {BOLD}{location}{RESET}: "
                     f"min {w_stats['temp_min']:.1f}°C, "
                     f"max {w_stats['temp_max']:.1f}°C, "
-                    f"ka {w_stats['temp_avg']:.1f}°C"
+                    f"{t('common_avg_abbr')} {w_stats['temp_avg']:.1f}°C"
                 )
                 if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
-                    line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                    line += f", {t('common_precipitation')} {w_stats['precipitation_total']:.1f} mm"
                 lines.append(line)
                 has_data = True
 
         if not has_data:
-            lines.append(f"  {DIM}Ei dataa valitulle ajanjaksolle{RESET}")
+            lines.append(f"  {DIM}{t('tui_history_no_data_period')}{RESET}")
 
         lines.append("")
-        lines.append(f"  {DIM}Aikajakso: h 6, h 1d, h 7d, h 30d{RESET}")
+        lines.append(f"  {DIM}{t('tui_history_period_hint')}{RESET}")
 
     # ── Stats view ────────────────────────────────────────────────────
 
@@ -1169,7 +1171,7 @@ class TuiDashboard:
         ordered_macs, device_map, _ = self._get_ordered_devices()
 
         lines.append("")
-        lines.append(f"{BOLD}  Tilastot ({self._time_str()}){RESET}")
+        lines.append(f"{BOLD}  {t('tui_view_stats')} ({self._time_str()}){RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         has_data = False
@@ -1184,20 +1186,20 @@ class TuiDashboard:
                 days=self._view_days,
             )
             if not stats:
-                lines.append(f"  {i}. {name}: {DIM}ei dataa{RESET}")
+                lines.append(f"  {i}. {name}: {DIM}{t('common_no_data')}{RESET}")
                 continue
 
             has_data = True
             lines.append(f"  {i}. {BOLD}{name}{RESET}:")
             lines.append(
-                f"     Lämpötila:  min {stats['temp_min']:.1f}°C, "
+                f"     {t('tui_stats_temp_label')}  min {stats['temp_min']:.1f}°C, "
                 f"max {stats['temp_max']:.1f}°C, "
-                f"ka {stats['temp_avg']:.1f}°C"
+                f"{t('common_avg_abbr')} {stats['temp_avg']:.1f}°C"
             )
             if stats.get("humidity_avg") is not None:
-                lines.append(f"     Kosteus:    ka {stats['humidity_avg']:.0f}%")
+                lines.append(f"     {t('tui_stats_humidity_label')}    {t('common_avg_abbr')} {stats['humidity_avg']:.0f}%")
             lines.append(
-                f"     Data:       {stats['sample_count']} pistettä"
+                f"     {t('tui_stats_data_label')}       {t('tui_stats_points', n=stats['sample_count'])}"
             )
 
         # Weather stats
@@ -1211,22 +1213,22 @@ class TuiDashboard:
                 location = self._weather.location_name
                 lines.append(f"  {get_weather_emoji(None)} {BOLD}{location}{RESET}:")
                 lines.append(
-                    f"     Lämpötila:  min {w_stats['temp_min']:.1f}°C, "
+                    f"     {t('tui_stats_temp_label')}  min {w_stats['temp_min']:.1f}°C, "
                     f"max {w_stats['temp_max']:.1f}°C, "
-                    f"ka {w_stats['temp_avg']:.1f}°C"
+                    f"{t('common_avg_abbr')} {w_stats['temp_avg']:.1f}°C"
                 )
                 if w_stats.get("humidity_avg") is not None:
-                    lines.append(f"     Kosteus:    ka {w_stats['humidity_avg']:.0f}%")
+                    lines.append(f"     {t('tui_stats_humidity_label')}    {t('common_avg_abbr')} {w_stats['humidity_avg']:.0f}%")
                 if w_stats.get("wind_avg") is not None:
-                    lines.append(f"     Tuuli:      ka {w_stats['wind_avg']:.1f} m/s")
+                    lines.append(f"     {t('tui_stats_wind_label')}      {t('common_avg_abbr')} {w_stats['wind_avg']:.1f} m/s")
                 if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
-                    lines.append(f"     Sade:       {w_stats['precipitation_total']:.1f} mm")
+                    lines.append(f"     {t('tui_stats_precip_label')}       {w_stats['precipitation_total']:.1f} mm")
 
         if not has_data:
-            lines.append(f"  {DIM}Ei dataa valitulle ajanjaksolle{RESET}")
+            lines.append(f"  {DIM}{t('tui_stats_no_data_period')}{RESET}")
 
         lines.append("")
-        lines.append(f"  {DIM}Aikajakso: s 6h, s 1d, s 7d, s 30d{RESET}")
+        lines.append(f"  {DIM}{t('tui_stats_period_hint')}{RESET}")
 
     # ── Devices view ──────────────────────────────────────────────────
 
@@ -1235,15 +1237,15 @@ class TuiDashboard:
         devices = self._db.get_all_devices()
 
         lines.append("")
-        lines.append(f"{BOLD}  Laitteet{RESET}")
+        lines.append(f"{BOLD}  {t('tui_view_devices')}{RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         if not devices:
-            lines.append(f"  {DIM}Ei laitteita{RESET}")
+            lines.append(f"  {DIM}{t('tui_devices_no_devices')}{RESET}")
         else:
             # Column headers
             lines.append(
-                f"  {DIM}{'#':<4}{'Nimi':<16}{'Alias':<16}{'MAC':<20}{'Tyyppi':<8}{RESET}"
+                f"  {DIM}{t('tui_devices_col_num'):<4}{t('tui_devices_col_name'):<16}{t('tui_devices_col_alias'):<16}{t('tui_devices_col_mac'):<20}{t('tui_devices_col_type'):<8}{RESET}"
             )
             lines.append(f"  {DIM}{'-' * (cols - 4)}{RESET}")
 
@@ -1259,7 +1261,7 @@ class TuiDashboard:
                 )
 
         lines.append("")
-        lines.append(f"  {DIM}Nimeä: n <nro> <nimi>   Poista alias: n <nro> -{RESET}")
+        lines.append(f"  {DIM}{t('tui_devices_rename_hint')}{RESET}")
 
     # ── Graph view ────────────────────────────────────────────────────
 
@@ -1275,13 +1277,14 @@ class TuiDashboard:
             data = self._db.get_weather_graph_data(hours)
 
         lines.append("")
-        lines.append(f"{BOLD}  {name} - Graafi ({self._time_str()}){RESET}")
+        lines.append(f"{BOLD}  {name} - {t('tui_view_graph')} ({self._time_str()}){RESET}")
         lines.append(f"  {'-' * (cols - 4)}")
 
         if not data:
-            lines.append(f"  {DIM}Ei dataa{RESET}")
+            lines.append(f"  {DIM}{t('tui_graph_no_data')}{RESET}")
             lines.append("")
-            lines.append(f"  {DIM}Aikajakso: g {self._graph_mac or 'saa'} 24h, g 1 7d{RESET}")
+            sensor_hint = self._graph_mac or "saa"
+            lines.append(f"  {DIM}{t('tui_graph_period_hint', sensor=sensor_hint)}{RESET}")
             return
 
         # Determine graph dimensions
@@ -1295,7 +1298,7 @@ class TuiDashboard:
         graph_height = 8
 
         graph_str, timeline = self._create_ascii_graph(data, graph_width, graph_height)
-        temps = [t for _, t in data]
+        temps = [v for _, v in data]
 
         # Indent the graph
         for graph_line in graph_str.split("\n"):
@@ -1306,11 +1309,11 @@ class TuiDashboard:
         lines.append(
             f"  Min: {BOLD}{min(temps):.1f}°C{RESET} | "
             f"Max: {BOLD}{max(temps):.1f}°C{RESET} | "
-            f"Ka: {BOLD}{sum(temps)/len(temps):.1f}°C{RESET}"
+            f"{t('common_avg_abbr').capitalize()}: {BOLD}{sum(temps)/len(temps):.1f}°C{RESET}"
         )
         lines.append("")
         sensor_hint = self._graph_mac or "saa"
-        lines.append(f"  {DIM}Aikajakso: g {sensor_hint} 6h, g {sensor_hint} 7d{RESET}")
+        lines.append(f"  {DIM}{t('tui_graph_period_hint', sensor=sensor_hint)}{RESET}")
 
     def _create_ascii_graph(
         self,
@@ -1320,10 +1323,10 @@ class TuiDashboard:
     ) -> tuple[str, str]:
         """Create ASCII art graph from data points."""
         if not data:
-            return "Ei dataa", ""
+            return t("tui_graph_no_data"), ""
 
-        timestamps = [t for t, _ in data]
-        temps = [t for _, t in data]
+        timestamps = [ts for ts, _ in data]
+        temps = [v for _, v in data]
         min_temp = min(temps)
         max_temp = max(temps)
         temp_range = max_temp - min_temp

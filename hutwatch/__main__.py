@@ -77,6 +77,13 @@ def parse_args() -> argparse.Namespace:
         help="Launch ASCII TUI dashboard (skip Telegram)",
     )
 
+    parser.add_argument(
+        "--lang",
+        choices=["fi", "en"],
+        default=None,
+        help="UI language: fi (Finnish, default) or en (English)",
+    )
+
     return parser.parse_args()
 
 
@@ -93,6 +100,17 @@ def main() -> int:
         logger.error("Configuration file not found: %s", config_path)
         logger.error("Copy config.example.yaml to config.yaml and edit it")
         return 1
+
+    # Determine language: CLI --lang overrides config file
+    import yaml
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        raw_config = yaml.safe_load(f) or {}
+    lang = args.lang or raw_config.get("language", "fi")
+
+    from .i18n import init_lang
+
+    init_lang(lang)
 
     # Run the application
     try:

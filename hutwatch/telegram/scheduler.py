@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from telegram.ext import ContextTypes
 
 from ..ble.sensor_store import SensorStore
+from ..i18n import t
 from ..models import AppConfig
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class ReportScheduler:
             return
 
         chat_id = self._config.telegram.chat_id
-        lines = [f"📊 *Lämpötilaraportti* ({datetime.now().strftime('%d.%m. %H:%M')})\n"]
+        lines = [t("scheduler_report_header", timestamp=datetime.now().strftime('%d.%m. %H:%M'))]
 
         has_data = False
         for sensor_config in self._config.sensors:
@@ -56,7 +57,7 @@ class ReportScheduler:
                 if reading.humidity is not None:
                     line += f", {reading.humidity:.0f}%"
             else:
-                line = f"*{sensor_config.name}*: _ei dataa_"
+                line = f"*{sensor_config.name}*: {t('common_no_data_md')}"
 
             lines.append(line)
 

@@ -1,95 +1,102 @@
 # HutWatch
 
-BLE-lämpötilaseuranta Telegram-botilla ja terminaalikäyttöliittymällä. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista, hakee ulkosään yr.no:sta ja lähettää tiedot Telegramiin tai näyttää ne ASCII-dashboardissa.
+> English | **[Suomi](LUEMINUT.md)**
+
+BLE temperature monitoring with a Telegram bot and terminal UI. Reads temperature/humidity data from RuuviTag and Xiaomi LYWSD03MMC sensors, fetches outdoor weather from yr.no, and displays data via Telegram, an ASCII dashboard, or console output.
 
 ![TUI Dashboard](resources/tui-dashboard.png)
 
-## Ominaisuudet
+## Features
 
-- RuuviTag (Data Format 3/5) tuki
-- Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) tuki
-- Jatkuva autodiscovery: uudet anturit löytyvät automaattisesti myös kun sensoreita on jo konfiguroitu
-- Ulkosää MET Norway API:sta (yr.no), 1h päivitysvälillä
-- **Kolme käyttöliittymää:**
-  - **Telegram-botti**: `/temps`, `/weather`, `/history`, `/stats`, `/graph`, `/menu`
-  - **TUI-dashboard**: ASCII-pohjainen terminaalinäkymä (lämpötilat, sää, tilastot, graafit, laitteiden hallinta)
-  - **Konsolituloste**: yksinkertainen taulukkotuloste määrävälein tai Enterillä
-- SQLite-tietokanta pitkäaikaishistorialle
-- 24h muistivälimuisti + 90 päivän tietokantahistoria
-- Paikan nimeäminen ja sääpaikan asetus TUI:sta (tallennetaan tietokantaan)
-- Systemd-palvelu
+- RuuviTag (Data Format 3/5) support
+- Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) support
+- Continuous auto-discovery: new sensors are found automatically even when some are pre-configured
+- Outdoor weather from MET Norway API (yr.no), updated hourly
+- **Three UI modes:**
+  - **Telegram bot**: `/temps`, `/weather`, `/history`, `/stats`, `/graph`, `/menu`
+  - **TUI dashboard**: interactive ASCII terminal view (temperatures, weather, stats, graphs, device management)
+  - **Console output**: simple table output at intervals or on keypress
+- SQLite database for long-term history
+- 24h in-memory cache + 90-day database history
+- Site naming and weather location setting from TUI (persisted to database)
+- Bilingual UI: Finnish (default) and English — set via config or `--lang` flag
+- Systemd service
 
-## Vaatimukset
+## Requirements
 
 - Python 3.10+
-- Bluetooth-adapteri (BLE-tuki)
-- Linux (testattu Ubuntu 20.04/22.04) tai macOS
+- Bluetooth adapter (BLE support)
+- Linux (tested on Ubuntu 20.04/22.04) or macOS
 
-## Asennus
+## Installation
 
 ```bash
-# Kloonaa repo
+# Clone the repo
 git clone https://github.com/trotor/hutwatch.git
 cd hutwatch
 
-# Luo virtuaaliympäristö
+# Create a virtual environment
 python3 -m venv venv
 
-# Asenna — valitse toinen:
-./venv/bin/pip install -e .              # Ilman Telegramia
-./venv/bin/pip install -e ".[telegram]"  # Telegram-botti mukaan
+# Install — choose one:
+./venv/bin/pip install -e .              # Without Telegram
+./venv/bin/pip install -e ".[telegram]"  # With Telegram bot
 
-# Kopioi ja muokkaa konfiguraatio
+# Copy and edit configuration
 cp config.example.yaml config.yaml
 nano config.yaml
 ```
 
-> **Huom:** Jos päivität olemassaolevaa asennusta jossa Telegram on käytössä,
-> varmista että asennat `.[telegram]`-extran. Pelkkä `pip install -e .` ei
-> asenna Telegram-pakettia.
+> **Note:** If you are upgrading an existing installation with Telegram enabled,
+> make sure to install the `.[telegram]` extra. A plain `pip install -e .` will
+> not install the Telegram package.
 
-## Konfiguraatio
+## Configuration
 
-Muokkaa `config.yaml`:
+Edit `config.yaml`:
 
 ```yaml
-# Tyhjä lista = vain autodiscovery
-# Listatut anturit + autodiscovery: uudet löytyvät silti automaattisesti
+# UI language: fi (Finnish, default) or en (English)
+# Can also be set with --lang CLI flag
+# language: fi
+
+# Empty list = auto-discovery only
+# Listed sensors + auto-discovery: new sensors are still found automatically
 sensors: []
 
-# Tai listaa anturit manuaalisesti:
+# Or list sensors manually:
 # sensors:
 #   - mac: "AA:BB:CC:DD:EE:FF"
-#     name: "Ulkona"
+#     name: "Outdoor"
 #     type: ruuvi
 #   - mac: "11:22:33:44:55:66"
-#     name: "Sisällä"
+#     name: "Indoor"
 #     type: xiaomi
 
-# Telegram-botti (valinnainen — vaatii pip install hutwatch[telegram])
-# Ilman Telegramia käytetään konsolitulosteetta tai TUI:ta.
+# Telegram bot (optional — requires pip install hutwatch[telegram])
+# Without Telegram, use console output or TUI.
 # telegram:
 #   token: "YOUR_BOT_TOKEN"
 #   chat_id: YOUR_CHAT_ID
 #   report_interval: 3600
 
-# Ulkosää yr.no:sta (valinnainen — voi asettaa myös TUI:sta)
+# Outdoor weather from yr.no (optional — can also be set from TUI)
 # weather:
 #   latitude: 60.1699
 #   longitude: 24.9384
 #   location_name: "Helsinki"
 ```
 
-### Telegram-botin luonti
+### Creating a Telegram Bot
 
-1. Avaa Telegram ja etsi `@BotFather`
-2. Lähetä `/newbot` ja seuraa ohjeita
-3. Kopioi token config.yaml-tiedostoon
+1. Open Telegram and find `@BotFather`
+2. Send `/newbot` and follow the instructions
+3. Copy the token to your config.yaml
 
-### Chat ID:n hakeminen
+### Finding Your Chat ID
 
-1. Lähetä viesti botillesi Telegramissa
-2. Aja:
+1. Send a message to your bot in Telegram
+2. Run:
 ```bash
 ./venv/bin/python -c "
 import asyncio
@@ -102,53 +109,53 @@ for u in updates:
 "
 ```
 
-## Käyttö
+## Usage
 
-### TUI-dashboard (suositeltu paikalliseen käyttöön)
+### TUI Dashboard (recommended for local use)
 
 ```bash
 ./venv/bin/python -m hutwatch -c config.yaml --tui
 ```
 
-Interaktiivinen ASCII-dashboard jossa:
+Interactive ASCII dashboard with the following commands:
 
-| Komento | Toiminto |
-|---------|----------|
-| `h [aika]` | Historia (esim. `h 6`, `h 1d`, `h 7d`) |
-| `s [aika]` | Tilastot (esim. `s 1d`, `s 7d`) |
-| `g <n> [aika]` | Lämpötilagraafi (esim. `g 1 24h`, `g saa 7d`) |
-| `d` | Laitelista |
-| `n <n> <nimi>` | Nimeä anturi (esim. `n 1 Olohuone`) |
-| `p <nimi>` | Nimeä paikka (esim. `p Mökki`) |
-| `w <paikka>` | Aseta sääpaikka (esim. `w Toivala`) |
-| `w <lat> <lon>` | Aseta sää koordinaateilla |
-| `wr` | Päivitä sää heti |
-| `t` | Näytä/piilota status-osio |
-| `r` / Enter | Päivitä / takaisin dashboardiin |
-| `q` | Lopeta |
+| Command | Action |
+|---------|--------|
+| `h [time]` | History (e.g., `h 6`, `h 1d`, `h 7d`) |
+| `s [time]` | Statistics (e.g., `s 1d`, `s 7d`) |
+| `g <n> [time]` | Temperature graph (e.g., `g 1 24h`, `g weather 7d`) |
+| `d` | Device list |
+| `n <n> <name>` | Rename sensor (e.g., `n 1 Living room`) |
+| `p <name>` | Name the site (e.g., `p Cabin`) |
+| `w <place>` | Set weather location (e.g., `w Helsinki`) |
+| `w <lat> <lon>` | Set weather by coordinates |
+| `wr` | Refresh weather now |
+| `t` | Toggle status section |
+| `r` / Enter | Refresh / back to dashboard |
+| `q` | Quit |
 
-Sääpaikka ja paikan nimi tallentuvat tietokantaan — säilyvät uudelleenkäynnistysten yli.
+Weather location and site name are stored in the database and persist across restarts.
 
-### Konsolituloste
+### Console Output
 
 ```bash
-# Tulosta 60s välein (ohita Telegram)
+# Print every 60s (skip Telegram)
 ./venv/bin/python -m hutwatch -c config.yaml --console 60
 
-# Tulosta Enterillä
+# Print on Enter keypress
 ./venv/bin/python -m hutwatch -c config.yaml --console
 
-# Oletus (ei Telegramia): tulosta 30s välein
+# Default (no Telegram): print every 30s
 ./venv/bin/python -m hutwatch -c config.yaml -v
 ```
 
-### Telegram-botti
+### Telegram Bot
 
 ```bash
 ./venv/bin/python -m hutwatch -c config.yaml -v
 ```
 
-### Systemd-palvelu
+### Systemd Service
 
 ```bash
 sudo cp hutwatch.service /etc/systemd/system/
@@ -159,53 +166,53 @@ sudo systemctl status hutwatch
 sudo journalctl -u hutwatch -f
 ```
 
-## Telegram-komennot
+## Telegram Commands
 
-### Peruskomennot
+### Basic Commands
 
-| Komento | Kuvaus |
-|---------|--------|
-| `/menu` | Interaktiivinen valikko napeilla |
-| `/temps` | Kaikkien anturien lämpötilat + sää |
-| `/weather` | Yksityiskohtainen säätila |
-| `/status` | Järjestelmän tila |
-| `/help` | Ohje |
+| Command | Description |
+|---------|-------------|
+| `/menu` | Interactive menu with buttons |
+| `/temps` | All sensor temperatures + weather |
+| `/weather` | Detailed weather conditions |
+| `/status` | System status |
+| `/help` | Help |
 
-### Historia ja tilastot
+### History and Statistics
 
-| Komento | Kuvaus |
-|---------|--------|
-| `/history` | Lämpötilahistoria (6h oletus) |
-| `/history 24h` | 24 tunnin historia |
-| `/history 7d` | 7 päivän historia |
-| `/stats 1d` | Päivän tilastot (min/max/avg) |
-| `/graph 1 24h` | ASCII-graafi anturille 1 |
-| `/graph sää 48h` | Sään lämpötilagraafi |
+| Command | Description |
+|---------|-------------|
+| `/history` | Temperature history (6h default) |
+| `/history 24h` | 24-hour history |
+| `/history 7d` | 7-day history |
+| `/stats 1d` | Daily statistics (min/max/avg) |
+| `/graph 1 24h` | ASCII graph for sensor 1 |
+| `/graph sää 48h` | Weather temperature graph |
 
-### Laitteiden hallinta
+### Device Management
 
-| Komento | Kuvaus |
-|---------|--------|
-| `/devices` | Listaa laitteet numeroineen |
-| `/rename 1 Olohuone` | Nimeä laite 1 uudelleen |
-| `/report on/off` | Ajastetut raportit päälle/pois |
+| Command | Description |
+|---------|-------------|
+| `/devices` | List devices with numbers |
+| `/rename 1 Living room` | Rename device 1 |
+| `/report on/off` | Toggle scheduled reports |
 
-## Interaktiivinen valikko
+## Interactive Menu
 
-Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
+The `/menu` or `/start` command opens an interactive menu with inline buttons:
 
-- Lämpötilat ja sää yhdellä napilla
-- Historia 1d / 7d / 30d
-- Tilastot 1d / 7d / 30d
-- Päivitä-nappi jokaisessa näkymässä
+- Temperatures and weather in one tap
+- History 1d / 7d / 30d
+- Statistics 1d / 7d / 30d
+- Refresh button in every view
 
-## macOS: taustapalvelu ja työpöytäwidget
+## macOS: Background Service and Desktop Widget
 
-### Taustaajo launchd:llä
+### Background Service with launchd
 
-macOS:n natiivi palvelunhallinta. Käynnistyy automaattisesti kirjautumisen yhteydessä ja uudelleenkäynnistyy virheen sattuessa.
+Native macOS service management. Starts automatically on login and restarts on failure.
 
-1. Luo tiedosto `~/Library/LaunchAgents/com.hutwatch.agent.plist`:
+1. Create `~/Library/LaunchAgents/com.hutwatch.agent.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -217,79 +224,79 @@ macOS:n natiivi palvelunhallinta. Käynnistyy automaattisesti kirjautumisen yhte
     <string>com.hutwatch.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/teroronkko/code/hutwatch/venv/bin/python3</string>
+        <string>/path/to/hutwatch/venv/bin/python3</string>
         <string>-m</string>
         <string>hutwatch</string>
         <string>-c</string>
-        <string>/Users/teroronkko/code/hutwatch/config.yaml</string>
+        <string>/path/to/hutwatch/config.yaml</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/teroronkko/code/hutwatch</string>
+    <string>/path/to/hutwatch</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/teroronkko/code/hutwatch/logs/hutwatch.log</string>
+    <string>/path/to/hutwatch/logs/hutwatch.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/teroronkko/code/hutwatch/logs/hutwatch.err</string>
+    <string>/path/to/hutwatch/logs/hutwatch.err</string>
 </dict>
 </plist>
 ```
 
-2. Ota käyttöön:
+2. Enable:
 
 ```bash
 mkdir -p logs
 launchctl load ~/Library/LaunchAgents/com.hutwatch.agent.plist
 ```
 
-3. Hallinta:
+3. Management:
 
 ```bash
-# Tarkista tila
+# Check status
 launchctl list | grep hutwatch
 
-# Pysäytä
+# Stop
 launchctl unload ~/Library/LaunchAgents/com.hutwatch.agent.plist
 
-# Käynnistä uudelleen
+# Restart
 launchctl unload ~/Library/LaunchAgents/com.hutwatch.agent.plist
 launchctl load ~/Library/LaunchAgents/com.hutwatch.agent.plist
 
-# Lokien seuranta
+# Follow logs
 tail -f logs/hutwatch.log
 ```
 
-### Übersicht-työpöytäwidget
+### Übersicht Desktop Widget
 
-[Übersicht](https://tracesof.net/uebersicht/) on ilmainen macOS-sovellus, joka näyttää HTML/JS-widgettejä työpöydällä.
+[Übersicht](https://tracesof.net/uebersicht/) is a free macOS app that displays HTML/JS widgets on the desktop.
 
-1. Asenna Übersicht: https://tracesof.net/uebersicht/
-2. Kopioi widget:
+1. Install Übersicht: https://tracesof.net/uebersicht/
+2. Copy the widget:
 
 ```bash
 cp -r widget/hutwatch.widget "$HOME/Library/Application Support/Übersicht/widgets/"
 ```
 
-3. Muokkaa polut tiedostossa `index.jsx` (rivit 7-8) vastaamaan omaa asennustasi
-4. Widget päivittyy automaattisesti 30 sekunnin välein
+3. Edit the paths in `index.jsx` (lines 7-8) to match your installation
+4. The widget updates automatically every 30 seconds
 
-Widget-data tuotetaan komennolla:
+Widget data is produced by:
 
 ```bash
 ./venv/bin/python -m hutwatch.widget_output -d hutwatch.db
 ```
 
-## Xiaomi-anturin firmware
+## Xiaomi Sensor Firmware
 
-Xiaomi LYWSD03MMC vaatii custom firmwaren BLE-mainosten lähettämiseen:
+Xiaomi LYWSD03MMC requires custom firmware to broadcast BLE advertisements:
 
 - [ATC firmware](https://github.com/atc1441/ATC_MiThermometer)
 - [PVVX firmware](https://github.com/pvvx/ATC_MiThermometer)
 
-Flashaus onnistuu selaimella: https://pvvx.github.io/ATC_MiThermometer/TelinkMiFlasher.html
+Flashing can be done in the browser: https://pvvx.github.io/ATC_MiThermometer/TelinkMiFlasher.html
 
-## Lisenssi
+## License
 
 MIT

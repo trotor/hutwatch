@@ -86,6 +86,7 @@ class AppConfig:
     sensors: list[SensorConfig] = field(default_factory=list)
     telegram: Optional[TelegramConfig] = None
     weather: Optional[WeatherConfig] = None
+    language: str = "fi"
 
     def get_sensor_by_mac(self, mac: str) -> Optional[SensorConfig]:
         """Get sensor config by MAC address."""

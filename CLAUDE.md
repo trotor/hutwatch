@@ -8,7 +8,8 @@ HutWatch is a BLE (Bluetooth Low Energy) temperature monitoring system with thre
 
 **Language**: Python 3.10+ (async/await throughout)
 **Platform**: Linux with Bluetooth adapter (tested Ubuntu 20.04/22.04), macOS (Core Bluetooth)
-**UI Language**: Finnish (all Telegram messages and some commands)
+**UI Language**: Bilingual Finnish/English via `t()` translation system
+**Documentation**: English (README.md), Finnish (LUEMINUT.md)
 
 ## Installation
 
@@ -27,6 +28,9 @@ python3 -m venv venv
 ```bash
 # TUI dashboard (recommended for local use)
 ./venv/bin/python -m hutwatch -c config.yaml --tui
+
+# TUI in English
+./venv/bin/python -m hutwatch -c config.yaml --tui --lang en
 
 # Console output every 60s
 ./venv/bin/python -m hutwatch -c config.yaml --console 60
@@ -78,6 +82,34 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
 - **Thread-safe cache**: SensorStore uses locks (BLE callback thread + aggregator)
 - **Graceful shutdown**: Signal handlers (SIGINT/SIGTERM) coordinate shutdown
 
+## Internationalization (i18n)
+
+All user-facing strings are translated via a dictionary-based `t(key, **kwargs)` system. No external i18n libraries.
+
+**Files:**
+- `hutwatch/i18n.py` — `t()`, `init_lang()`, `wind_direction_text()` helpers
+- `hutwatch/strings_fi.py` — Finnish strings (~175 keys)
+- `hutwatch/strings_en.py` — English strings (same keys)
+
+**Key naming:** `category_description` in snake_case:
+- `common_` — shared (no_data, weather default name, min/max/avg)
+- `time_` — age/uptime formatting (callable lambdas for pluralization)
+- `weather_` — wind directions (list), labels, precipitation
+- `tg_` — Telegram messages (include Markdown formatting)
+- `tui_` — TUI dashboard
+- `console_` — console output
+- `scheduler_` — scheduled reports
+
+**String value types:**
+1. Plain string: `"tg_help_title": "📋 *Help*"`
+2. Format template: `"tg_device_temp": "{order}. *{name}*: {temp:.1f}°C"`
+3. Callable (pluralization): `"time_days": lambda n, **_: f"{n} day" if n == 1 else f"{n} days"`
+4. List: `"weather_wind_directions": ["north", "northeast", ...]`
+
+**Language selection:** `config.yaml: language: fi` (default) or `en`. CLI `--lang en` overrides config. `init_lang()` is called in `__main__.py` before loading config.
+
+**Not translated:** log messages, CLI --help text, widget JSON keys, BLE parsers.
+
 ## Sensor Parsers
 
 Located in `hutwatch/ble/parsers/`:
@@ -116,6 +148,7 @@ Interactive ASCII dashboard (`--tui`):
 - `w <place>` — Set weather location by name (geocoding via Nominatim)
 - `w <lat> <lon>` — Set weather location by coordinates
 - `wr` — Refresh weather now
+- `t` — Toggle status section
 - `r` / Enter — Refresh / back to dashboard
 - `q` — Quit
 
@@ -131,6 +164,7 @@ Async operations from sync command handlers use "pending action" pattern (flags 
 ## Configuration
 
 `config.yaml` contains:
+- `language`: UI language — `fi` (default) or `en`. Can be overridden with `--lang` CLI flag.
 - `sensors`: List of MAC addresses with names and types (ruuvi/xiaomi). Discovery is always on — new sensors are found automatically even when some are pre-configured. Empty list `[]` uses pure auto-discovery.
 - `telegram`: Bot token, chat_id, report_interval (optional — requires `pip install hutwatch[telegram]`)
 - `weather`: Coordinates (latitude/longitude) and location_name (optional — can also be set from TUI, persisted to DB)

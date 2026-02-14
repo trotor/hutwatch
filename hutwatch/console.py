@@ -10,6 +10,7 @@ from typing import Optional
 
 from .ble.sensor_store import SensorStore
 from .db import Database
+from .i18n import t
 from .models import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class ConsoleReporter:
 
     async def _run_keypress(self) -> None:
         """Print readings when Enter is pressed."""
-        print("Press Enter to show readings, Ctrl+C to quit")
+        print(t("console_press_enter"))
         await asyncio.sleep(3)  # Wait for initial data
 
         loop = asyncio.get_running_loop()
@@ -114,7 +115,7 @@ class ConsoleReporter:
         """Print current sensor readings as a formatted table."""
         readings = self._store.get_all_latest()
         if not readings:
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] No sensor data yet...")
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] {t('console_no_data_yet')}")
             return
 
         now = datetime.now()
@@ -139,22 +140,28 @@ class ConsoleReporter:
 
             age = (now - reading.timestamp).total_seconds()
             if age < 60:
-                age_str = f"{age:.0f}s ago"
+                age_str = t("time_ago_seconds", n=int(age))
             else:
-                age_str = f"{age / 60:.0f}m ago"
+                age_str = t("time_ago_minutes", n=int(age / 60))
 
             rows.append((name, temp, humidity, battery, age_str))
 
         # Print table
-        name_w = max(len(r[0]) for r in rows)
-        name_w = max(name_w, 6)  # min width
+        col_sensor = t("console_col_sensor")
+        col_temp = t("console_col_temp")
+        col_hum = t("console_col_humidity")
+        col_batt = t("console_col_battery")
+        col_age = t("console_col_age")
 
-        header = f"{'Sensor':<{name_w}}  {'Temp':>7}  {'Hum':>5}  {'Batt':>6}  {'Age':>7}"
+        name_w = max(len(r[0]) for r in rows)
+        name_w = max(name_w, len(col_sensor))
+
+        header = f"{col_sensor:<{name_w}}  {col_temp:>7}  {col_hum:>5}  {col_batt:>6}  {col_age:>7}"
         separator = "-" * len(header)
 
         lines = [
             "",
-            f"[{now.strftime('%H:%M:%S')}] Sensor Readings ({len(rows)} sensors)",
+            f"[{now.strftime('%H:%M:%S')}] {t('console_header', count=len(rows))}",
             separator,
             header,
             separator,

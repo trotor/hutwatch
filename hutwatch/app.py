@@ -14,6 +14,7 @@ from .ble.sensor_store import SensorStore
 from .config import load_config
 from .console import ConsoleReporter
 from .db import Database
+from .i18n import t
 from .models import AppConfig, WeatherConfig
 from .tui import TuiDashboard
 from .weather import WeatherFetcher
@@ -78,7 +79,7 @@ class HutWatchApp:
             lon_str = self._db.get_setting("weather_lon")
             if lat_str and lon_str:
                 try:
-                    name = self._db.get_setting("weather_name") or "Sää"
+                    name = self._db.get_setting("weather_name") or t("common_weather_default_name")
                     self._config.weather = WeatherConfig(
                         latitude=float(lat_str),
                         longitude=float(lon_str),
@@ -162,7 +163,7 @@ class HutWatchApp:
         # Send shutdown message
         if self._bot:
             try:
-                await self._bot.send_message("🔴 *HutWatch pysähtyy*")
+                await self._bot.send_message(t("tg_shutdown_message"))
             except Exception:
                 pass
 
@@ -207,8 +208,10 @@ class HutWatchApp:
 
         logger.info("HutWatch stopped")
 
-    async def setup_weather(self, lat: float, lon: float, name: str = "Sää") -> None:
+    async def setup_weather(self, lat: float, lon: float, name: str = "") -> None:
         """Set up weather fetching dynamically (e.g. from TUI)."""
+        if not name:
+            name = t("common_weather_default_name")
         weather_config = WeatherConfig(latitude=lat, longitude=lon, location_name=name)
         self._config.weather = weather_config
 

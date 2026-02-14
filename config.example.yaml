@@ -1,6 +1,10 @@
 # HutWatch configuration example
 # Copy this file to config.yaml and fill in your values
 
+# UI language: fi (Finnish, default) or en (English)
+# Can also be set with --lang CLI flag
+# language: fi
+
 # Sensors: list specific MACs, or use an empty list for pure auto-discovery.
 # Discovery is always on — new sensors are found automatically even when
 # some sensors are pre-configured below.

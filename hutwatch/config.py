@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from .i18n import t
 from .models import AppConfig, SensorConfig, SensorType, TelegramConfig, WeatherConfig
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def load_config(config_path: Path) -> AppConfig:
             weather_config = WeatherConfig(
                 latitude=float(w_data["latitude"]),
                 longitude=float(w_data["longitude"]),
-                location_name=w_data.get("location_name", "Sää"),
+                location_name=w_data.get("location_name", t("common_weather_default_name")),
             )
             logger.debug(
                 "Loaded weather configuration: %s (%.4f, %.4f)",
@@ -65,6 +66,13 @@ def load_config(config_path: Path) -> AppConfig:
         except (KeyError, ValueError) as e:
             logger.warning("Invalid weather configuration: %s", e)
 
-    config = AppConfig(sensors=sensors, telegram=telegram_config, weather=weather_config)
+    language = data.get("language", "fi")
+
+    config = AppConfig(
+        sensors=sensors,
+        telegram=telegram_config,
+        weather=weather_config,
+        language=language,
+    )
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config
