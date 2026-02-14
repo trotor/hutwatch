@@ -11,9 +11,11 @@ requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.9.0",
     "bleak>=0.21.0",
-    "python-telegram-bot[job-queue]>=20.0",
     "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+telegram = ["python-telegram-bot[job-queue]>=20.0"]
 
 [project.scripts]
 hutwatch = "hutwatch.__main__:main"

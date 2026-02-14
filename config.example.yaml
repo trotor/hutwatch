@@ -1,22 +1,30 @@
 # HutWatch configuration example
 # Copy this file to config.yaml and fill in your values
 
-sensors:
-  - mac: "AA:BB:CC:DD:EE:FF"
-    name: "Ruuvi1"
-    type: ruuvi
-  - mac: "11:22:33:44:55:66"
-    name: "Xiaomi1"
-    type: xiaomi
+# Sensors: list specific MACs, or use an empty list for pure auto-discovery.
+# Discovery is always on — new sensors are found automatically even when
+# some sensors are pre-configured below.
+sensors: []
 
-telegram:
-  token: "your-telegram-bot-token"
-  chat_id: 123456789
-  report_interval: 3600
+# To pre-configure specific sensors (new ones are still discovered automatically):
+# sensors:
+#   - mac: "AA:BB:CC:DD:EE:FF"
+#     name: "Ruuvi1"
+#     type: ruuvi
+#   - mac: "11:22:33:44:55:66"
+#     name: "Xiaomi1"
+#     type: xiaomi
 
-# Weather from yr.no (MET Norway API)
+# Telegram bot (optional — install with: pip install hutwatch[telegram])
+# Without Telegram, readings are printed to the console.
+# telegram:
+#   token: "your-telegram-bot-token"
+#   chat_id: 123456789
+#   report_interval: 3600
+
+# Weather from yr.no (MET Norway API) — optional
 # Find coordinates: https://www.latlong.net/
-weather:
-  latitude: 60.1699
-  longitude: 24.9384
-  location_name: "Helsinki"
+# weather:
+#   latitude: 60.1699
+#   longitude: 24.9384
+#   location_name: "Helsinki"

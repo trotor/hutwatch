@@ -1,0 +1,166 @@
+"""Console reporter for displaying sensor readings without Telegram."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sys
+from datetime import datetime
+from typing import Optional
+
+from .ble.sensor_store import SensorStore
+from .db import Database
+from .models import AppConfig
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_INTERVAL_SECONDS = 30
+
+
+class ConsoleReporter:
+    """Prints sensor readings to the console.
+
+    Supports two modes:
+    - Timed mode (interval > 0): prints automatically every N seconds
+    - Keypress mode (interval == 0): prints when Enter is pressed
+    """
+
+    def __init__(
+        self,
+        config: AppConfig,
+        store: SensorStore,
+        db: Database,
+        interval: int = DEFAULT_INTERVAL_SECONDS,
+    ) -> None:
+        self._config = config
+        self._store = store
+        self._db = db
+        self._interval = interval
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+
+    async def start(self) -> None:
+        """Start the console reporter."""
+        self._running = True
+
+        if self._interval == 0:
+            self._task = asyncio.create_task(self._run_keypress(), name="console_reporter")
+            logger.info("Console reporter started (keypress mode)")
+        else:
+            self._task = asyncio.create_task(self._run_timed(), name="console_reporter")
+            logger.info("Console reporter started (every %ds)", self._interval)
+
+    async def stop(self) -> None:
+        """Stop the console reporter."""
+        self._running = False
+
+        # Remove stdin reader if active
+        try:
+            loop = asyncio.get_running_loop()
+            loop.remove_reader(sys.stdin)
+        except (ValueError, NotImplementedError):
+            pass
+
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
+    async def _run_timed(self) -> None:
+        """Print readings at a fixed interval."""
+        await asyncio.sleep(5)  # Wait for initial data
+
+        while self._running:
+            try:
+                self._print_readings()
+            except Exception as e:
+                logger.warning("Console reporter error: %s", e)
+
+            await asyncio.sleep(self._interval)
+
+    async def _run_keypress(self) -> None:
+        """Print readings when Enter is pressed."""
+        print("Press Enter to show readings, Ctrl+C to quit")
+        await asyncio.sleep(3)  # Wait for initial data
+
+        loop = asyncio.get_running_loop()
+        event = asyncio.Event()
+
+        def _on_stdin() -> None:
+            sys.stdin.readline()
+            event.set()
+
+        try:
+            loop.add_reader(sys.stdin, _on_stdin)
+        except NotImplementedError:
+            # Fallback for platforms without add_reader (e.g. Windows)
+            logger.warning("Keypress mode not supported on this platform, using 30s interval")
+            await self._run_timed()
+            return
+
+        while self._running:
+            event.clear()
+            await event.wait()
+            if self._running:
+                try:
+                    self._print_readings()
+                except Exception as e:
+                    logger.warning("Console reporter error: %s", e)
+
+    def _print_readings(self) -> None:
+        """Print current sensor readings as a formatted table."""
+        readings = self._store.get_all_latest()
+        if not readings:
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] No sensor data yet...")
+            return
+
+        now = datetime.now()
+        devices = self._db.get_all_devices()
+        device_map = {d.mac: d for d in devices}
+
+        # Build rows
+        rows: list[tuple[str, str, str, str, str]] = []
+        for mac, reading in sorted(readings.items()):
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+
+            temp = f"{reading.temperature:.1f}C"
+            humidity = f"{reading.humidity:.0f}%" if reading.humidity is not None else "-"
+
+            if reading.battery_percent is not None:
+                battery = f"{reading.battery_percent}%"
+            elif reading.battery_voltage is not None:
+                battery = f"{reading.battery_voltage:.2f}V"
+            else:
+                battery = "-"
+
+            age = (now - reading.timestamp).total_seconds()
+            if age < 60:
+                age_str = f"{age:.0f}s ago"
+            else:
+                age_str = f"{age / 60:.0f}m ago"
+
+            rows.append((name, temp, humidity, battery, age_str))
+
+        # Print table
+        name_w = max(len(r[0]) for r in rows)
+        name_w = max(name_w, 6)  # min width
+
+        header = f"{'Sensor':<{name_w}}  {'Temp':>7}  {'Hum':>5}  {'Batt':>6}  {'Age':>7}"
+        separator = "-" * len(header)
+
+        lines = [
+            "",
+            f"[{now.strftime('%H:%M:%S')}] Sensor Readings ({len(rows)} sensors)",
+            separator,
+            header,
+            separator,
+        ]
+        for name, temp, hum, batt, age in rows:
+            lines.append(f"{name:<{name_w}}  {temp:>7}  {hum:>5}  {batt:>6}  {age:>7}")
+        lines.append(separator)
+
+        print("\n".join(lines))

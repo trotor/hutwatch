@@ -97,8 +97,35 @@ class Database:
             ON weather(timestamp)
         """)
 
+        # Key-value settings table
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
         self._conn.commit()
         logger.debug("Database tables created")
+
+    def get_setting(self, key: str) -> Optional[str]:
+        """Get a setting value by key."""
+        if not self._conn:
+            return None
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Set a setting value (insert or update)."""
+        if not self._conn:
+            return
+        self._conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        self._conn.commit()
 
     def save_aggregated_reading(
         self,

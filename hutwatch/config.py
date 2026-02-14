@@ -19,7 +19,7 @@ def load_config(config_path: Path) -> AppConfig:
         data = yaml.safe_load(f)
 
     if not data:
-        raise ValueError("Configuration file is empty")
+        data = {}
 
     sensors = []
     for sensor_data in data.get("sensors", []):

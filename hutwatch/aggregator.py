@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 # Aggregation interval in seconds (5 minutes)
 AGGREGATION_INTERVAL = 300
 
-# Weather fetch interval in seconds (10 minutes)
-WEATHER_FETCH_INTERVAL = 600
+# Weather fetch interval in seconds (1 hour)
+WEATHER_FETCH_INTERVAL = 3600
 
 
 class Aggregator:
@@ -54,6 +54,19 @@ class Aggregator:
         if self._weather:
             logger.info("Starting weather fetcher (interval: %ds)", WEATHER_FETCH_INTERVAL)
             self._weather_task = asyncio.create_task(self._run_weather())
+
+    def set_weather(self, weather: "WeatherFetcher") -> None:
+        """Set weather fetcher and start periodic fetching."""
+        self._weather = weather
+        if self._running and not self._weather_task:
+            self._weather_task = asyncio.create_task(self._run_weather())
+
+    async def fetch_weather_now(self) -> bool:
+        """Fetch weather on demand. Returns True if successful."""
+        if not self._weather:
+            return False
+        await self._fetch_weather()
+        return self._weather.latest is not None
 
     async def stop(self) -> None:
         """Stop the aggregator."""

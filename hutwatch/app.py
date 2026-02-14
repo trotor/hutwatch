@@ -12,10 +12,19 @@ from .aggregator import Aggregator
 from .ble.scanner import BleScanner
 from .ble.sensor_store import SensorStore
 from .config import load_config
+from .console import ConsoleReporter
 from .db import Database
-from .models import AppConfig
-from .telegram.bot import TelegramBot
+from .models import AppConfig, WeatherConfig
+from .tui import TuiDashboard
 from .weather import WeatherFetcher
+
+try:
+    from .telegram.bot import TelegramBot
+
+    _HAS_TELEGRAM = True
+except ImportError:
+    TelegramBot = None  # type: ignore[assignment,misc]
+    _HAS_TELEGRAM = False
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +32,26 @@ logger = logging.getLogger(__name__)
 class HutWatchApp:
     """Main application that coordinates all components."""
 
-    def __init__(self, config_path: Path, db_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        config_path: Path,
+        db_path: Optional[Path] = None,
+        console_interval: Optional[int] = None,
+        use_tui: bool = False,
+    ) -> None:
         self._config_path = config_path
         self._db_path = db_path or config_path.parent / "hutwatch.db"
+        self._console_interval = console_interval
+        self._use_tui = use_tui
         self._config: Optional[AppConfig] = None
         self._store: Optional[SensorStore] = None
         self._db: Optional[Database] = None
         self._scanner: Optional[BleScanner] = None
         self._aggregator: Optional[Aggregator] = None
         self._weather: Optional[WeatherFetcher] = None
-        self._bot: Optional[TelegramBot] = None
+        self._bot: Optional["TelegramBot"] = None
+        self._console: Optional[ConsoleReporter] = None
+        self._tui: Optional[TuiDashboard] = None
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
         self._scanner_task: Optional[asyncio.Task] = None
@@ -53,6 +72,22 @@ class HutWatchApp:
         self._db.sync_devices_from_config(self._config.sensors)
 
         # Initialize weather fetcher if configured
+        if not self._config.weather:
+            # Try loading weather location from database
+            lat_str = self._db.get_setting("weather_lat")
+            lon_str = self._db.get_setting("weather_lon")
+            if lat_str and lon_str:
+                try:
+                    name = self._db.get_setting("weather_name") or "Sää"
+                    self._config.weather = WeatherConfig(
+                        latitude=float(lat_str),
+                        longitude=float(lon_str),
+                        location_name=name,
+                    )
+                    logger.info("Weather location loaded from database")
+                except ValueError:
+                    pass
+
         if self._config.weather:
             self._weather = WeatherFetcher(self._config.weather)
             await self._weather.start()
@@ -65,11 +100,21 @@ class HutWatchApp:
 
         # Initialize components
         self._store = SensorStore()
-        self._scanner = BleScanner(self._config, self._store)
+        self._scanner = BleScanner(self._config, self._store, db=self._db)
         self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
-        if self._config.telegram:
+        # Determine local mode (--console or --tui skip Telegram)
+        _local_mode = self._use_tui or self._console_interval is not None
+
+        if not _local_mode and self._config.telegram and _HAS_TELEGRAM:
             self._bot = TelegramBot(self._config, self._store, self._db, self._weather)
+        elif _local_mode and self._config.telegram:
+            logger.info("Local mode active, skipping Telegram bot")
+        elif self._config.telegram and not _HAS_TELEGRAM:
+            logger.warning(
+                "Telegram configured but python-telegram-bot not installed. "
+                "Install with: pip install hutwatch[telegram]"
+            )
 
         # Start aggregator (does not need restart loop)
         await self._aggregator.start()
@@ -88,6 +133,20 @@ class HutWatchApp:
             )
             # Wait briefly for bot to start before sending message
             await asyncio.sleep(2)
+        else:
+            # No Telegram — use TUI or console output
+            if self._use_tui:
+                self._tui = TuiDashboard(
+                    self._config, self._store, self._db, self._weather,
+                    app=self,
+                )
+                await self._tui.start()
+            else:
+                interval = self._console_interval if self._console_interval is not None else 30
+                self._console = ConsoleReporter(
+                    self._config, self._store, self._db, interval=interval,
+                )
+                await self._console.start()
 
         self._running = True
         logger.info("HutWatch started successfully")
@@ -125,6 +184,12 @@ class HutWatchApp:
             self._scanner_task = None
 
         # Stop components in reverse order
+        if self._tui:
+            await self._tui.stop()
+
+        if self._console:
+            await self._console.stop()
+
         if self._bot:
             await self._bot.stop()
 
@@ -141,6 +206,36 @@ class HutWatchApp:
             self._db.close()
 
         logger.info("HutWatch stopped")
+
+    async def setup_weather(self, lat: float, lon: float, name: str = "Sää") -> None:
+        """Set up weather fetching dynamically (e.g. from TUI)."""
+        weather_config = WeatherConfig(latitude=lat, longitude=lon, location_name=name)
+        self._config.weather = weather_config
+
+        self._weather = WeatherFetcher(weather_config)
+        await self._weather.start()
+
+        # Tell aggregator to start periodic weather fetching
+        if self._aggregator:
+            self._aggregator.set_weather(self._weather)
+
+        # Update TUI reference
+        if self._tui:
+            self._tui.set_weather(self._weather)
+
+        # Persist to database for next startup
+        if self._db:
+            self._db.set_setting("weather_lat", str(lat))
+            self._db.set_setting("weather_lon", str(lon))
+            self._db.set_setting("weather_name", name)
+
+        logger.info("Weather configured for %s (%.4f, %.4f)", name, lat, lon)
+
+    async def refresh_weather(self) -> bool:
+        """Fetch weather on demand. Returns True if successful."""
+        if self._aggregator:
+            return await self._aggregator.fetch_weather_now()
+        return False
 
     async def run(self) -> None:
         """Run the application until shutdown signal."""

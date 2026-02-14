@@ -1,24 +1,27 @@
 # HutWatch
 
-BLE-lämpötilaseuranta Telegram-botilla. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista, hakee ulkosään yr.no:sta ja lähettää tiedot Telegramiin.
+BLE-lämpötilaseuranta Telegram-botilla ja terminaalikäyttöliittymällä. Lukee lämpötiladataa RuuviTag- ja Xiaomi LYWSD03MMC -antureista, hakee ulkosään yr.no:sta ja lähettää tiedot Telegramiin tai näyttää ne ASCII-dashboardissa.
 
 ## Ominaisuudet
 
 - RuuviTag (Data Format 3/5) tuki
 - Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) tuki
-- Ulkosää MET Norway API:sta (yr.no)
-- Telegram-komennot: `/temps`, `/weather`, `/history`, `/stats`, `/graph`
-- Interaktiivinen valikko inline-napeilla (`/menu`)
-- Ajastetut raportit (oletus 1h välein)
+- Jatkuva autodiscovery: uudet anturit löytyvät automaattisesti myös kun sensoreita on jo konfiguroitu
+- Ulkosää MET Norway API:sta (yr.no), 1h päivitysvälillä
+- **Kolme käyttöliittymää:**
+  - **Telegram-botti**: `/temps`, `/weather`, `/history`, `/stats`, `/graph`, `/menu`
+  - **TUI-dashboard**: ASCII-pohjainen terminaalinäkymä (lämpötilat, sää, tilastot, graafit, laitteiden hallinta)
+  - **Konsolituloste**: yksinkertainen taulukkotuloste määrävälein tai Enterillä
 - SQLite-tietokanta pitkäaikaishistorialle
 - 24h muistivälimuisti + 90 päivän tietokantahistoria
+- Paikan nimeäminen ja sääpaikan asetus TUI:sta (tallennetaan tietokantaan)
 - Systemd-palvelu
 
 ## Vaatimukset
 
 - Python 3.10+
 - Bluetooth-adapteri (BLE-tuki)
-- Linux (testattu Ubuntu 20.04/22.04)
+- Linux (testattu Ubuntu 20.04/22.04) tai macOS
 
 ## Asennus
 
@@ -27,38 +30,52 @@ BLE-lämpötilaseuranta Telegram-botilla. Lukee lämpötiladataa RuuviTag- ja Xi
 git clone https://github.com/trotor/hutwatch.git
 cd hutwatch
 
-# Luo virtuaaliympäristö ja asenna riippuvuudet
+# Luo virtuaaliympäristö
 python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
+
+# Asenna — valitse toinen:
+./venv/bin/pip install -e .              # Ilman Telegramia
+./venv/bin/pip install -e ".[telegram]"  # Telegram-botti mukaan
 
 # Kopioi ja muokkaa konfiguraatio
 cp config.example.yaml config.yaml
 nano config.yaml
 ```
 
+> **Huom:** Jos päivität olemassaolevaa asennusta jossa Telegram on käytössä,
+> varmista että asennat `.[telegram]`-extran. Pelkkä `pip install -e .` ei
+> asenna Telegram-pakettia.
+
 ## Konfiguraatio
 
 Muokkaa `config.yaml`:
 
 ```yaml
-sensors:
-  - mac: "AA:BB:CC:DD:EE:FF"
-    name: "Ulkona"
-    type: ruuvi
-  - mac: "11:22:33:44:55:66"
-    name: "Sisällä"
-    type: xiaomi
+# Tyhjä lista = vain autodiscovery
+# Listatut anturit + autodiscovery: uudet löytyvät silti automaattisesti
+sensors: []
 
-telegram:
-  token: "YOUR_BOT_TOKEN"
-  chat_id: YOUR_CHAT_ID
-  report_interval: 3600
+# Tai listaa anturit manuaalisesti:
+# sensors:
+#   - mac: "AA:BB:CC:DD:EE:FF"
+#     name: "Ulkona"
+#     type: ruuvi
+#   - mac: "11:22:33:44:55:66"
+#     name: "Sisällä"
+#     type: xiaomi
 
-# Ulkosää yr.no:sta (valinnainen)
-weather:
-  latitude: 60.1699
-  longitude: 24.9384
-  location_name: "Helsinki"
+# Telegram-botti (valinnainen — vaatii pip install hutwatch[telegram])
+# Ilman Telegramia käytetään konsolitulosteetta tai TUI:ta.
+# telegram:
+#   token: "YOUR_BOT_TOKEN"
+#   chat_id: YOUR_CHAT_ID
+#   report_interval: 3600
+
+# Ulkosää yr.no:sta (valinnainen — voi asettaa myös TUI:sta)
+# weather:
+#   latitude: 60.1699
+#   longitude: 24.9384
+#   location_name: "Helsinki"
 ```
 
 ### Telegram-botin luonti
@@ -83,30 +100,46 @@ for u in updates:
 "
 ```
 
-### Anturien MAC-osoitteiden etsiminen
-
-```bash
-./venv/bin/python -c "
-import asyncio
-from bleak import BleakScanner
-
-async def scan():
-    devices = await BleakScanner.discover(timeout=10, return_adv=True)
-    for addr, (dev, adv) in devices.items():
-        if 'Ruuvi' in (dev.name or '') or 'ATC' in (dev.name or ''):
-            print(f'{addr}: {dev.name}')
-
-asyncio.run(scan())
-"
-```
-
-### Koordinaattien etsiminen säälle
-
-Hae koordinaatit esim. [latlong.net](https://www.latlong.net/) -palvelusta.
-
 ## Käyttö
 
-### Manuaalinen käynnistys
+### TUI-dashboard (suositeltu paikalliseen käyttöön)
+
+```bash
+./venv/bin/python -m hutwatch -c config.yaml --tui
+```
+
+Interaktiivinen ASCII-dashboard jossa:
+
+| Komento | Toiminto |
+|---------|----------|
+| `h [aika]` | Historia (esim. `h 6`, `h 1d`, `h 7d`) |
+| `s [aika]` | Tilastot (esim. `s 1d`, `s 7d`) |
+| `g <n> [aika]` | Lämpötilagraafi (esim. `g 1 24h`, `g saa 7d`) |
+| `d` | Laitelista |
+| `n <n> <nimi>` | Nimeä anturi (esim. `n 1 Olohuone`) |
+| `p <nimi>` | Nimeä paikka (esim. `p Mökki`) |
+| `w <paikka>` | Aseta sääpaikka (esim. `w Toivala`) |
+| `w <lat> <lon>` | Aseta sää koordinaateilla |
+| `wr` | Päivitä sää heti |
+| `r` / Enter | Päivitä / takaisin dashboardiin |
+| `q` | Lopeta |
+
+Sääpaikka ja paikan nimi tallentuvat tietokantaan — säilyvät uudelleenkäynnistysten yli.
+
+### Konsolituloste
+
+```bash
+# Tulosta 60s välein (ohita Telegram)
+./venv/bin/python -m hutwatch -c config.yaml --console 60
+
+# Tulosta Enterillä
+./venv/bin/python -m hutwatch -c config.yaml --console
+
+# Oletus (ei Telegramia): tulosta 30s välein
+./venv/bin/python -m hutwatch -c config.yaml -v
+```
+
+### Telegram-botti
 
 ```bash
 ./venv/bin/python -m hutwatch -c config.yaml -v
@@ -115,15 +148,11 @@ Hae koordinaatit esim. [latlong.net](https://www.latlong.net/) -palvelusta.
 ### Systemd-palvelu
 
 ```bash
-# Muokkaa polut hutwatch.service-tiedostossa tarvittaessa
 sudo cp hutwatch.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now hutwatch
 
-# Tarkista tila
 sudo systemctl status hutwatch
-
-# Lokit
 sudo journalctl -u hutwatch -f
 ```
 
@@ -166,17 +195,6 @@ Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
 - Historia 1d / 7d / 30d
 - Tilastot 1d / 7d / 30d
 - Päivitä-nappi jokaisessa näkymässä
-
-## Vinkki: AI-avusteinen konfigurointi
-
-Telegram-botin luonti, chat ID:n hakeminen ja anturien etsiminen onnistuu helposti myös AI-apurin avulla. Esimerkiksi [Claude Code](https://claude.ai/download) osaa:
-
-- Skannata BLE-laitteet ja tunnistaa anturit automaattisesti
-- Hakea Telegram chat ID:n puolestasi
-- Generoida config.yaml-tiedoston löydetyillä antureilla
-- Asentaa ja käynnistää palvelun
-
-Kerro vain mitä haluat tehdä, niin AI hoitaa loput.
 
 ## Xiaomi-anturin firmware
 

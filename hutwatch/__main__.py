@@ -9,8 +9,13 @@ from pathlib import Path
 from .app import HutWatchApp
 
 
-def setup_logging(verbose: bool) -> None:
+def setup_logging(verbose: bool, quiet: bool = False) -> None:
     """Configure logging."""
+    if quiet:
+        # TUI mode: suppress all log output to avoid corrupting the display
+        logging.basicConfig(level=logging.CRITICAL + 1)
+        return
+
     level = logging.DEBUG if verbose else logging.INFO
     format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
@@ -22,8 +27,14 @@ def setup_logging(verbose: bool) -> None:
 
     # Reduce noise from libraries
     logging.getLogger("bleak").setLevel(logging.WARNING)
-    logging.getLogger("telegram").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    try:
+        import telegram  # noqa: F401
+
+        logging.getLogger("telegram").setLevel(logging.WARNING)
+    except ImportError:
+        pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,13 +57,33 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging",
     )
 
+    parser.add_argument(
+        "-o", "--console",
+        nargs="?",
+        const=0,
+        type=int,
+        default=None,
+        metavar="INTERVAL",
+        help=(
+            "Force console output mode (skip Telegram). "
+            "--console alone = keypress mode (Enter to print), "
+            "--console 60 = print every 60 seconds"
+        ),
+    )
+
+    parser.add_argument(
+        "-t", "--tui",
+        action="store_true",
+        help="Launch ASCII TUI dashboard (skip Telegram)",
+    )
+
     return parser.parse_args()
 
 
 def main() -> int:
     """Main entry point."""
     args = parse_args()
-    setup_logging(args.verbose)
+    setup_logging(args.verbose, quiet=args.tui)
 
     logger = logging.getLogger(__name__)
 
@@ -65,7 +96,7 @@ def main() -> int:
 
     # Run the application
     try:
-        app = HutWatchApp(config_path)
+        app = HutWatchApp(config_path, console_interval=args.console, use_tui=args.tui)
         asyncio.run(app.run())
         return 0
     except KeyboardInterrupt:

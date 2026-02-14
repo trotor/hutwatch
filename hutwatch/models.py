@@ -99,6 +99,16 @@ class AppConfig:
         """Get all configured sensor MAC addresses."""
         return {s.mac for s in self.sensors}
 
+    def add_sensor(self, mac: str, name: str, sensor_type: SensorType) -> SensorConfig:
+        """Add a dynamically discovered sensor."""
+        mac = mac.upper()
+        existing = self.get_sensor_by_mac(mac)
+        if existing:
+            return existing
+        sensor = SensorConfig(mac=mac, name=name, type=sensor_type)
+        self.sensors.append(sensor)
+        return sensor
+
 
 @dataclass
 class DeviceInfo:

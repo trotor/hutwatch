@@ -1,0 +1,1107 @@
+"""ASCII TUI dashboard for local monitoring."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import shutil
+import sys
+from datetime import datetime
+from typing import Optional
+
+from .ble.sensor_store import SensorStore
+from .db import Database
+from .models import AppConfig, DeviceInfo
+from .weather import WeatherFetcher, get_weather_emoji
+
+logger = logging.getLogger(__name__)
+
+# ANSI escape codes
+CLEAR_SCREEN = "\033[2J\033[H"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+
+# Refresh interval for auto-update (seconds)
+AUTO_REFRESH_SECONDS = 10
+
+
+def _wind_direction_text(degrees: Optional[float]) -> str:
+    """Convert wind direction degrees to Finnish text."""
+    if degrees is None:
+        return ""
+    directions = [
+        "pohjoisesta", "koillisesta", "idästä", "kaakosta",
+        "etelästä", "lounaasta", "lännestä", "luoteesta",
+    ]
+    index = int((degrees + 22.5) / 45) % 8
+    return directions[index]
+
+
+def _format_age(seconds: float) -> str:
+    """Format age in seconds to human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        return f"{seconds / 60:.0f}min"
+    else:
+        return f"{seconds / 3600:.0f}h"
+
+
+class TuiDashboard:
+    """Terminal-based dashboard showing sensor data, weather, and status.
+
+    Views:
+      dashboard  - current readings, weather, status (default)
+      history    - min/max/avg per sensor over time period
+      stats      - detailed statistics from database
+      devices    - device list with MAC, type, alias
+      graph      - ASCII temperature graph for a sensor
+
+    Commands (type + Enter):
+      r / Enter  - refresh current view
+      q          - quit
+      h [period] - history (e.g. h, h 1d, h 7d)
+      s [period] - stats (e.g. s, s 7d)
+      d          - devices list
+      g <n> [period] - graph for sensor n (e.g. g 1, g 1 7d)
+      n <n> <name>   - rename device (e.g. n 1 Olohuone)
+      n <n> -              - clear device alias
+      p <name>             - name this site (e.g. p Mökki)
+      p -                  - clear site name
+      w <place>            - set weather by place name (geocoding)
+      w <lat> <lon> [name] - set weather by coordinates
+      wr                   - refresh weather now
+    """
+
+    def __init__(
+        self,
+        config: AppConfig,
+        store: SensorStore,
+        db: Database,
+        weather: Optional[WeatherFetcher] = None,
+        app: Optional[object] = None,
+    ) -> None:
+        self._config = config
+        self._store = store
+        self._db = db
+        self._weather = weather
+        self._app = app  # HutWatchApp reference for dynamic setup
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+        self._start_time = datetime.now()
+
+        # Pending async actions (set by sync command handler, executed in async loop)
+        self._pending_weather: Optional[tuple[float, float, str]] = None
+        self._pending_geocode: Optional[str] = None
+        self._pending_weather_refresh = False
+
+        # View state
+        self._view = "dashboard"
+        self._view_hours: Optional[int] = None  # for history/stats/graph
+        self._view_days: Optional[int] = None
+        self._graph_mac: Optional[str] = None  # for graph view
+        self._graph_name: Optional[str] = None
+        self._status_msg: Optional[str] = None  # one-shot feedback message
+
+    def set_weather(self, weather: WeatherFetcher) -> None:
+        """Update weather fetcher reference (called by app after dynamic setup)."""
+        self._weather = weather
+
+    async def start(self) -> None:
+        """Start the TUI dashboard."""
+        self._running = True
+        self._task = asyncio.create_task(self._run(), name="tui_dashboard")
+        logger.info("TUI dashboard started")
+
+    async def stop(self) -> None:
+        """Stop the TUI dashboard."""
+        self._running = False
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.remove_reader(sys.stdin)
+        except (ValueError, NotImplementedError):
+            pass
+
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
+        # Show cursor again
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+
+    async def _run(self) -> None:
+        """Main loop: render dashboard and handle input."""
+        loop = asyncio.get_running_loop()
+        input_event = asyncio.Event()
+        input_line = ""
+        quit_requested = False
+
+        def _on_stdin() -> None:
+            nonlocal input_line, quit_requested
+            line = sys.stdin.readline().strip()
+            input_line = line
+            if line.lower() in ("q", "quit"):
+                quit_requested = True
+            input_event.set()
+
+        try:
+            loop.add_reader(sys.stdin, _on_stdin)
+        except NotImplementedError:
+            pass
+
+        # Hide cursor
+        sys.stdout.write("\033[?25l")
+        sys.stdout.flush()
+
+        # Wait for initial data
+        await asyncio.sleep(3)
+
+        while self._running:
+            self._render()
+            input_event.clear()
+
+            try:
+                await asyncio.wait_for(input_event.wait(), timeout=AUTO_REFRESH_SECONDS)
+            except asyncio.TimeoutError:
+                self._status_msg = None
+                continue
+
+            if quit_requested:
+                self._running = False
+                import signal
+                os.kill(os.getpid(), signal.SIGINT)
+                return
+
+            self._handle_command(input_line)
+            input_line = ""
+
+            # Handle pending async actions
+            if self._pending_geocode:
+                query = self._pending_geocode
+                self._pending_geocode = None
+                result = await self._geocode(query)
+                if result:
+                    lat, lon, display_name = result
+                    try:
+                        await self._app.setup_weather(lat, lon, display_name)
+                        self._status_msg = f"Sää asetettu: {display_name} ({lat:.4f}, {lon:.4f})"
+                    except Exception as e:
+                        self._status_msg = f"Virhe sään asetuksessa: {e}"
+                # else: error status already set by _geocode
+
+            if self._pending_weather_refresh:
+                self._pending_weather_refresh = False
+                try:
+                    ok = await self._app.refresh_weather()
+                    self._status_msg = "Sää päivitetty" if ok else "Sään päivitys epäonnistui"
+                except Exception as e:
+                    self._status_msg = f"Virhe: {e}"
+
+            elif self._pending_weather:
+                lat, lon, name = self._pending_weather
+                self._pending_weather = None
+                try:
+                    await self._app.setup_weather(lat, lon, name)
+                    self._status_msg = f"Sää asetettu: {name} ({lat}, {lon})"
+                except Exception as e:
+                    self._status_msg = f"Virhe sään asetuksessa: {e}"
+
+    # ── Command handling ──────────────────────────────────────────────
+
+    def _handle_command(self, line: str) -> None:
+        """Parse and execute a user command."""
+        self._status_msg = None
+        parts = line.split()
+
+        if not parts:
+            # Empty Enter = refresh, go back to dashboard
+            self._view = "dashboard"
+            return
+
+        cmd = parts[0].lower()
+
+        if cmd == "r":
+            # Refresh current view
+            return
+
+        if cmd == "h":
+            self._view = "history"
+            self._view_hours = 6
+            self._view_days = None
+            if len(parts) > 1:
+                self._parse_time_arg(parts[1])
+            return
+
+        if cmd == "s":
+            self._view = "stats"
+            self._view_hours = None
+            self._view_days = 1
+            if len(parts) > 1:
+                self._parse_time_arg(parts[1])
+            return
+
+        if cmd == "d":
+            self._view = "devices"
+            return
+
+        if cmd == "g":
+            self._handle_graph_cmd(parts[1:])
+            return
+
+        if cmd == "n":
+            self._handle_rename_cmd(parts[1:])
+            return
+
+        if cmd == "p":
+            self._handle_site_name_cmd(parts[1:])
+            return
+
+        if cmd == "w":
+            self._handle_weather_cmd(parts[1:])
+            return
+
+        if cmd == "wr":
+            if self._weather and self._app:
+                self._pending_weather_refresh = True
+                self._status_msg = "Päivitetään sää..."
+            else:
+                self._status_msg = "Sää ei käytössä"
+            return
+
+        self._status_msg = f"Tuntematon komento: {cmd}"
+
+    def _parse_time_arg(self, arg: str) -> None:
+        """Parse time argument like '6', '6h', '7d' into _view_hours/_view_days."""
+        arg = arg.lower().strip()
+        if arg.endswith("d"):
+            try:
+                self._view_days = int(arg[:-1])
+                self._view_hours = None
+            except ValueError:
+                pass
+        elif arg.endswith("h"):
+            try:
+                self._view_hours = int(arg[:-1])
+                self._view_days = None
+            except ValueError:
+                pass
+        else:
+            try:
+                self._view_hours = int(arg)
+                self._view_days = None
+            except ValueError:
+                pass
+
+    def _handle_graph_cmd(self, args: list[str]) -> None:
+        """Handle graph command: g <sensor_num> [period]."""
+        if not args:
+            self._status_msg = "Kaytto: g <anturi> [aika]  (esim. g 1, g 1 7d, g saa)"
+            return
+
+        # Check for weather graph
+        if args[0].lower() in ("saa", "sää", "weather"):
+            if not self._weather:
+                self._status_msg = "Saa ei kaytossa"
+                return
+            self._view = "graph"
+            self._graph_mac = None
+            self._graph_name = self._weather.location_name if self._weather else "Saa"
+            self._view_hours = 24
+            self._view_days = None
+            if len(args) > 1:
+                self._parse_time_arg(args[1])
+            return
+
+        device = self._resolve_device(args[0])
+        if not device:
+            self._status_msg = f"Anturia '{args[0]}' ei loytynyt"
+            return
+
+        self._view = "graph"
+        self._graph_mac = device.mac
+        self._graph_name = device.get_display_name()
+        self._view_hours = 24
+        self._view_days = None
+        if len(args) > 1:
+            self._parse_time_arg(args[1])
+
+    def _handle_rename_cmd(self, args: list[str]) -> None:
+        """Handle rename command: n <device_num> <new_name> or n <device_num> -."""
+        if len(args) < 2:
+            self._status_msg = "Kaytto: n <nro> <nimi>  tai  n <nro> -  (tyhjenna)"
+            return
+
+        device = self._resolve_device(args[0])
+        if not device:
+            self._status_msg = f"Anturia '{args[0]}' ei loytynyt"
+            return
+
+        new_name = " ".join(args[1:])
+        if new_name == "-":
+            # Clear alias
+            self._db.set_device_alias(device.mac, None)
+            old_name = device.get_display_name()
+            self._status_msg = f"Alias poistettu: {old_name}"
+        else:
+            old_name = device.get_display_name()
+            self._db.set_device_alias(device.mac, new_name)
+            self._status_msg = f"Nimetty uudelleen: {old_name} -> {new_name}"
+
+    def _handle_site_name_cmd(self, args: list[str]) -> None:
+        """Handle site name command: p <name> or p - (clear)."""
+        if not args:
+            current = self._get_site_name()
+            if current:
+                self._status_msg = f"Paikan nimi: {current}  (tyhjennä: p -)"
+            else:
+                self._status_msg = "Käyttö: p <nimi>  (esim. p Mökki Toivalassa)"
+            return
+
+        name = " ".join(args)
+        if name == "-":
+            self._db.set_setting("site_name", "")
+            self._status_msg = "Paikan nimi poistettu"
+        else:
+            self._db.set_setting("site_name", name)
+            self._status_msg = f"Paikan nimi asetettu: {name}"
+
+    def _handle_weather_cmd(self, args: list[str]) -> None:
+        """Handle weather location command.
+
+        Supports:
+          w <lat> <lon> [name]  - set by coordinates
+          w <place name>        - search by place name (geocoding)
+        """
+        if not self._app:
+            self._status_msg = "Sään asetus ei tuettu tässä tilassa"
+            return
+
+        if not args:
+            self._status_msg = (
+                "Käyttö: w <paikka>  tai  w <lat> <lon> [nimi]\n"
+                "  Esim: w Toivala  tai  w 62.99 27.73 Toivala"
+            )
+            return
+
+        # Try to parse first two args as coordinates
+        if len(args) >= 2:
+            try:
+                lat = float(args[0])
+                lon = float(args[1])
+                if (-90 <= lat <= 90) and (-180 <= lon <= 180):
+                    name = " ".join(args[2:]) if len(args) > 2 else "Sää"
+                    self._pending_weather = (lat, lon, name)
+                    self._status_msg = f"Asetetaan sää: {name}..."
+                    return
+            except ValueError:
+                pass  # Not coordinates, treat as place name
+
+        # Place name search via geocoding
+        query = " ".join(args)
+        self._pending_geocode = query
+        self._status_msg = f"Haetaan paikkaa: {query}..."
+
+    async def _geocode(self, query: str) -> Optional[tuple[float, float, str]]:
+        """Geocode a place name using Nominatim (OpenStreetMap).
+
+        Returns (lat, lon, display_name) or None on failure.
+        """
+        import aiohttp
+
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "q": query,
+            "format": "json",
+            "limit": "1",
+            "countrycodes": "fi",
+        }
+        headers = {"User-Agent": "HutWatch/0.1.0"}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        self._status_msg = f"Geokoodaus epäonnistui (HTTP {resp.status})"
+                        return None
+                    results = await resp.json()
+
+            if not results:
+                self._status_msg = f"Paikkaa '{query}' ei löytynyt"
+                return None
+
+            result = results[0]
+            lat = float(result["lat"])
+            lon = float(result["lon"])
+            display_name = result.get("display_name", query)
+
+            # Shorten display name: take first 1-2 parts
+            parts = display_name.split(", ")
+            if len(parts) >= 2:
+                short_name = f"{parts[0]}, {parts[1]}"
+            else:
+                short_name = parts[0]
+
+            return lat, lon, short_name
+
+        except Exception as e:
+            self._status_msg = f"Geokoodausvirhe: {e}"
+            return None
+
+    def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
+        """Resolve device by order number, alias, config name, or MAC."""
+        if identifier.isdigit():
+            device = self._db.get_device_by_order(int(identifier))
+            if device:
+                sensor_config = self._config.get_sensor_by_mac(device.mac)
+                if sensor_config:
+                    device.config_name = sensor_config.name
+                return device
+
+        devices = self._db.get_all_devices()
+        for d in devices:
+            sensor_config = self._config.get_sensor_by_mac(d.mac)
+            if sensor_config:
+                d.config_name = sensor_config.name
+
+        for d in devices:
+            if d.alias and d.alias.lower() == identifier.lower():
+                return d
+        for d in devices:
+            if d.config_name and d.config_name.lower() == identifier.lower():
+                return d
+        for d in devices:
+            if d.mac == identifier.upper():
+                return d
+
+        return None
+
+    # ── Shared helpers ────────────────────────────────────────────────
+
+    def _get_ordered_devices(self) -> tuple[
+        list[str],
+        dict[str, "DeviceInfo"],
+        dict[str, object],
+    ]:
+        """Get ordered MAC list, device map, and readings map."""
+        readings = self._store.get_all_latest()
+        devices = self._db.get_all_devices()
+        device_map = {d.mac: d for d in devices}
+
+        # Populate config names
+        for d in devices:
+            sensor_config = self._config.get_sensor_by_mac(d.mac)
+            if sensor_config:
+                d.config_name = sensor_config.name
+
+        ordered_macs: list[str] = []
+        for d in sorted(devices, key=lambda x: x.display_order):
+            ordered_macs.append(d.mac)
+        for mac in sorted(readings.keys()):
+            if mac not in ordered_macs:
+                ordered_macs.append(mac)
+
+        return ordered_macs, device_map, readings
+
+    def _time_str(self) -> str:
+        """Get display string for current time period."""
+        if self._view_days:
+            return f"{self._view_days}d"
+        if self._view_hours:
+            return f"{self._view_hours}h"
+        return "24h"
+
+    def _effective_hours(self) -> int:
+        """Get effective hours for DB queries."""
+        if self._view_days:
+            return self._view_days * 24
+        return self._view_hours or 24
+
+    # ── Rendering ─────────────────────────────────────────────────────
+
+    def _render(self) -> None:
+        """Render the current view."""
+        cols = shutil.get_terminal_size().columns
+        cols = min(cols, 80)
+
+        lines: list[str] = []
+        self._render_header(lines, cols)
+
+        if self._view == "dashboard":
+            self._render_dashboard(lines, cols)
+        elif self._view == "history":
+            self._render_history(lines, cols)
+        elif self._view == "stats":
+            self._render_stats(lines, cols)
+        elif self._view == "devices":
+            self._render_devices(lines, cols)
+        elif self._view == "graph":
+            self._render_graph(lines, cols)
+
+        self._render_footer(lines, cols)
+
+        output = CLEAR_SCREEN + "\n".join(lines) + "\n"
+        sys.stdout.write(output)
+        sys.stdout.flush()
+
+    def _get_site_name(self) -> Optional[str]:
+        """Get the configured site name from database."""
+        name = self._db.get_setting("site_name")
+        return name if name else None
+
+    def _render_header(self, lines: list[str], cols: int) -> None:
+        """Render common header."""
+        now = datetime.now()
+        site_name = self._get_site_name()
+        title = f"HutWatch — {site_name}" if site_name else "HutWatch"
+        view_label = {
+            "dashboard": "",
+            "history": f" / Historia ({self._time_str()})",
+            "stats": f" / Tilastot ({self._time_str()})",
+            "devices": " / Laitteet",
+            "graph": f" / Graafi ({self._time_str()})",
+        }.get(self._view, "")
+
+        timestamp = now.strftime("%d.%m. %H:%M:%S")
+        left = f"{BOLD}{title}{RESET}{DIM}{view_label}{RESET}"
+        # Calculate visible length (without ANSI codes)
+        left_visible = len(title) + len(view_label)
+        padding = cols - left_visible - len(timestamp)
+        lines.append(f"{left}{' ' * max(padding, 2)}{DIM}{timestamp}{RESET}")
+        lines.append("=" * cols)
+
+    def _render_footer(self, lines: list[str], cols: int) -> None:
+        """Render common footer with status message and help."""
+        lines.append("")
+        lines.append("=" * cols)
+
+        if self._status_msg:
+            lines.append(f"  {YELLOW}{self._status_msg}{RESET}")
+
+        if self._view == "dashboard":
+            cmds = ["[h] historia", "[s] tilastot", "[d] laitteet", "[g <n>] graafi"]
+            cmds.append("[n <n> <nimi>] nimeä")
+            cmds.append("[p <nimi>] paikka")
+            if self._weather:
+                cmds.append("[wr] päivitä sää")
+            else:
+                cmds.append("[w <paikka>] sää")
+            cmds.append("[q] lopeta")
+            help_line = "  ".join(cmds)
+        else:
+            help_line = "[Enter] dashboard  [r] päivitä  [q] lopeta"
+
+        lines.append(f"  {DIM}{help_line}{RESET}")
+
+    # ── Dashboard view ────────────────────────────────────────────────
+
+    def _render_dashboard(self, lines: list[str], cols: int) -> None:
+        """Render the main dashboard with temps, weather, and status."""
+        now = datetime.now()
+        ordered_macs, device_map, readings = self._get_ordered_devices()
+
+        # Sensor readings
+        site_name = self._get_site_name()
+        section_title = f"Lämpötilat — {site_name}" if site_name else "Lämpötilat"
+        lines.append("")
+        lines.append(f"{BOLD}  {section_title}{RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        if not readings:
+            lines.append(f"  {DIM}Ei anturidataa vielä...{RESET}")
+        else:
+            for i, mac in enumerate(ordered_macs, 1):
+                reading = readings.get(mac)
+                device = device_map.get(mac)
+                name = device.get_display_name() if device else mac
+
+                if reading is None:
+                    lines.append(
+                        f"  {RED}✗{RESET} {i}. {name}: {DIM}ei yhteyttä{RESET}"
+                    )
+                    continue
+
+                temp = f"{reading.temperature:.1f}°C"
+                humidity = (
+                    f"{reading.humidity:.0f}%"
+                    if reading.humidity is not None
+                    else ""
+                )
+                age = (now - reading.timestamp).total_seconds()
+                age_str = _format_age(age)
+
+                if age < 300:
+                    status = f"{GREEN}●{RESET}"
+                elif age < 600:
+                    status = f"{YELLOW}●{RESET}"
+                else:
+                    status = f"{RED}●{RESET}"
+
+                parts = [f"  {status} {i}. {name}: {BOLD}{temp}{RESET}"]
+                if humidity:
+                    parts.append(humidity)
+                parts.append(f"{DIM}{age_str}{RESET}")
+                lines.append("  ".join(parts))
+
+        # 24h summary (inline)
+        self._render_24h_summary(lines, cols, ordered_macs, device_map)
+
+        # Weather
+        self._render_weather(lines, cols)
+
+        # Status
+        self._render_status(lines, cols, ordered_macs, device_map, readings, now)
+
+    def _render_24h_summary(
+        self,
+        lines: list[str],
+        cols: int,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+    ) -> None:
+        """Render 24h min/max/avg inline on the dashboard."""
+        has_stats = False
+        stat_lines: list[str] = []
+
+        for i, mac in enumerate(ordered_macs, 1):
+            stats = self._db.get_stats(mac, hours=24)
+            if not stats:
+                continue
+            if not has_stats:
+                has_stats = True
+                stat_lines.append("")
+                stat_lines.append(f"{BOLD}  24h yhteenveto{RESET}")
+                stat_lines.append(f"  {'-' * (cols - 4)}")
+
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+            stat_lines.append(
+                f"  {i}. {name}: "
+                f"min {stats['temp_min']:.1f}°C, "
+                f"max {stats['temp_max']:.1f}°C, "
+                f"ka {stats['temp_avg']:.1f}°C"
+            )
+
+        # Weather 24h stats
+        if self._weather:
+            w_stats = self._db.get_weather_stats(hours=24)
+            if w_stats:
+                location = self._weather.location_name
+                stat_line = (
+                    f"  {location}: "
+                    f"min {w_stats['temp_min']:.1f}°C, "
+                    f"max {w_stats['temp_max']:.1f}°C, "
+                    f"ka {w_stats['temp_avg']:.1f}°C"
+                )
+                if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
+                    stat_line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                stat_lines.append(stat_line)
+
+        if has_stats:
+            lines.extend(stat_lines)
+
+    def _render_weather(self, lines: list[str], cols: int) -> None:
+        """Render current weather section."""
+        if not self._weather:
+            return
+        weather = self._weather.latest
+        if not weather:
+            return
+
+        emoji = get_weather_emoji(weather.symbol_code)
+        location = self._weather.location_name
+
+        # Show when weather was last fetched
+        last_fetch = self._weather.last_fetch
+        if last_fetch:
+            age = (datetime.now() - last_fetch).total_seconds()
+            fetch_str = f" {DIM}(haettu {_format_age(age)} sitten){RESET}"
+        else:
+            fetch_str = ""
+
+        lines.append("")
+        lines.append(f"{BOLD}  {emoji} {location}{RESET}{fetch_str}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        lines.append(f"  Lämpötila:   {BOLD}{weather.temperature:.1f}°C{RESET}")
+
+        if weather.humidity is not None:
+            lines.append(f"  Kosteus:     {weather.humidity:.0f}%")
+
+        if weather.wind_speed is not None:
+            wind_dir = _wind_direction_text(weather.wind_direction)
+            wind = f"{weather.wind_speed:.1f} m/s"
+            if wind_dir:
+                wind += f" {wind_dir}"
+            lines.append(f"  Tuuli:       {wind}")
+
+        if weather.pressure is not None:
+            lines.append(f"  Ilmanpaine:  {weather.pressure:.0f} hPa")
+
+        if weather.precipitation is not None and weather.precipitation > 0:
+            lines.append(f"  Sade (1h):   {weather.precipitation:.1f} mm")
+
+        if weather.cloud_cover is not None:
+            lines.append(f"  Pilvisyys:   {weather.cloud_cover:.0f}%")
+
+    def _render_status(
+        self,
+        lines: list[str],
+        cols: int,
+        ordered_macs: list[str],
+        device_map: dict[str, DeviceInfo],
+        readings: dict,
+        now: datetime,
+    ) -> None:
+        """Render status section with connectivity and uptime."""
+        lines.append("")
+        lines.append(f"{BOLD}  Status{RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        active = 0
+        total = len(ordered_macs)
+        for mac in ordered_macs:
+            reading = readings.get(mac)
+            if reading:
+                age = (now - reading.timestamp).total_seconds()
+                if age < 600:
+                    active += 1
+
+        if total > 0:
+            lines.append(f"  Anturit:     {active}/{total} aktiivista")
+        else:
+            lines.append(f"  Anturit:     {DIM}ei konfiguroitu{RESET}")
+
+        for mac in ordered_macs:
+            reading = readings.get(mac)
+            if reading is None:
+                continue
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+            parts = [f"    {name}:"]
+            if reading.rssi is not None:
+                parts.append(f"RSSI {reading.rssi} dBm")
+            if reading.battery_percent is not None:
+                parts.append(f"akku {reading.battery_percent}%")
+            elif reading.battery_voltage is not None:
+                parts.append(f"akku {reading.battery_voltage:.2f}V")
+            if len(parts) > 1:
+                lines.append(", ".join(parts))
+
+        # Uptime
+        uptime = now - self._start_time
+        total_secs = int(uptime.total_seconds())
+        days = total_secs // 86400
+        hours = (total_secs % 86400) // 3600
+        mins = (total_secs % 3600) // 60
+
+        if days > 0:
+            uptime_str = f"{days}pv {hours}h {mins}min"
+        elif hours > 0:
+            uptime_str = f"{hours}h {mins}min"
+        else:
+            uptime_str = f"{mins}min"
+
+        lines.append(f"  Käynnissä:   {uptime_str}")
+
+    # ── History view ──────────────────────────────────────────────────
+
+    def _render_history(self, lines: list[str], cols: int) -> None:
+        """Render history view with min/max/avg per sensor."""
+        ordered_macs, device_map, readings = self._get_ordered_devices()
+
+        lines.append("")
+        lines.append(f"{BOLD}  Historia ({self._time_str()}){RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        hours = self._effective_hours()
+        has_data = False
+
+        for i, mac in enumerate(ordered_macs, 1):
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+
+            # Try in-memory data for short periods
+            if hours <= 24:
+                sensor_readings = self._store.get_history(mac)
+                if sensor_readings:
+                    temps = [r.temperature for r in sensor_readings]
+                    lines.append(
+                        f"  {i}. {BOLD}{name}{RESET}: "
+                        f"min {min(temps):.1f}°C, "
+                        f"max {max(temps):.1f}°C, "
+                        f"ka {sum(temps)/len(temps):.1f}°C "
+                        f"{DIM}({len(temps)} lukemaa){RESET}"
+                    )
+                    has_data = True
+                    continue
+
+            # Fall back to database
+            stats = self._db.get_stats(
+                mac,
+                hours=self._view_hours,
+                days=self._view_days,
+            )
+            if stats:
+                lines.append(
+                    f"  {i}. {BOLD}{name}{RESET}: "
+                    f"min {stats['temp_min']:.1f}°C, "
+                    f"max {stats['temp_max']:.1f}°C, "
+                    f"ka {stats['temp_avg']:.1f}°C "
+                    f"{DIM}({stats['sample_count']} datapistettä){RESET}"
+                )
+                has_data = True
+            else:
+                lines.append(
+                    f"  {i}. {name}: {DIM}ei dataa{RESET}"
+                )
+
+        # Weather history
+        if self._weather:
+            w_stats = self._db.get_weather_stats(
+                hours=self._view_hours,
+                days=self._view_days,
+            )
+            if w_stats:
+                location = self._weather.location_name
+                line = (
+                    f"  {get_weather_emoji(None)} {BOLD}{location}{RESET}: "
+                    f"min {w_stats['temp_min']:.1f}°C, "
+                    f"max {w_stats['temp_max']:.1f}°C, "
+                    f"ka {w_stats['temp_avg']:.1f}°C"
+                )
+                if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
+                    line += f", sade {w_stats['precipitation_total']:.1f} mm"
+                lines.append(line)
+                has_data = True
+
+        if not has_data:
+            lines.append(f"  {DIM}Ei dataa valitulle ajanjaksolle{RESET}")
+
+        lines.append("")
+        lines.append(f"  {DIM}Aikajakso: h 6, h 1d, h 7d, h 30d{RESET}")
+
+    # ── Stats view ────────────────────────────────────────────────────
+
+    def _render_stats(self, lines: list[str], cols: int) -> None:
+        """Render detailed statistics view."""
+        ordered_macs, device_map, _ = self._get_ordered_devices()
+
+        lines.append("")
+        lines.append(f"{BOLD}  Tilastot ({self._time_str()}){RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        has_data = False
+
+        for i, mac in enumerate(ordered_macs, 1):
+            device = device_map.get(mac)
+            name = device.get_display_name() if device else mac
+
+            stats = self._db.get_stats(
+                mac,
+                hours=self._view_hours,
+                days=self._view_days,
+            )
+            if not stats:
+                lines.append(f"  {i}. {name}: {DIM}ei dataa{RESET}")
+                continue
+
+            has_data = True
+            lines.append(f"  {i}. {BOLD}{name}{RESET}:")
+            lines.append(
+                f"     Lämpötila:  min {stats['temp_min']:.1f}°C, "
+                f"max {stats['temp_max']:.1f}°C, "
+                f"ka {stats['temp_avg']:.1f}°C"
+            )
+            if stats.get("humidity_avg") is not None:
+                lines.append(f"     Kosteus:    ka {stats['humidity_avg']:.0f}%")
+            lines.append(
+                f"     Data:       {stats['sample_count']} pistettä"
+            )
+
+        # Weather stats
+        if self._weather:
+            w_stats = self._db.get_weather_stats(
+                hours=self._view_hours,
+                days=self._view_days,
+            )
+            if w_stats:
+                has_data = True
+                location = self._weather.location_name
+                lines.append(f"  {get_weather_emoji(None)} {BOLD}{location}{RESET}:")
+                lines.append(
+                    f"     Lämpötila:  min {w_stats['temp_min']:.1f}°C, "
+                    f"max {w_stats['temp_max']:.1f}°C, "
+                    f"ka {w_stats['temp_avg']:.1f}°C"
+                )
+                if w_stats.get("humidity_avg") is not None:
+                    lines.append(f"     Kosteus:    ka {w_stats['humidity_avg']:.0f}%")
+                if w_stats.get("wind_avg") is not None:
+                    lines.append(f"     Tuuli:      ka {w_stats['wind_avg']:.1f} m/s")
+                if w_stats.get("precipitation_total") and w_stats["precipitation_total"] > 0:
+                    lines.append(f"     Sade:       {w_stats['precipitation_total']:.1f} mm")
+
+        if not has_data:
+            lines.append(f"  {DIM}Ei dataa valitulle ajanjaksolle{RESET}")
+
+        lines.append("")
+        lines.append(f"  {DIM}Aikajakso: s 6h, s 1d, s 7d, s 30d{RESET}")
+
+    # ── Devices view ──────────────────────────────────────────────────
+
+    def _render_devices(self, lines: list[str], cols: int) -> None:
+        """Render device list with MAC, type, alias, and order."""
+        devices = self._db.get_all_devices()
+
+        lines.append("")
+        lines.append(f"{BOLD}  Laitteet{RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        if not devices:
+            lines.append(f"  {DIM}Ei laitteita{RESET}")
+        else:
+            # Column headers
+            lines.append(
+                f"  {DIM}{'#':<4}{'Nimi':<16}{'Alias':<16}{'MAC':<20}{'Tyyppi':<8}{RESET}"
+            )
+            lines.append(f"  {DIM}{'-' * (cols - 4)}{RESET}")
+
+            for d in sorted(devices, key=lambda x: x.display_order):
+                sensor_config = self._config.get_sensor_by_mac(d.mac)
+                config_name = sensor_config.name if sensor_config else "-"
+                alias = d.alias or "-"
+                order = str(d.display_order)
+                sensor_type = d.sensor_type or "-"
+
+                lines.append(
+                    f"  {order:<4}{config_name:<16}{alias:<16}{d.mac:<20}{sensor_type:<8}"
+                )
+
+        lines.append("")
+        lines.append(f"  {DIM}Nimeä: n <nro> <nimi>   Poista alias: n <nro> -{RESET}")
+
+    # ── Graph view ────────────────────────────────────────────────────
+
+    def _render_graph(self, lines: list[str], cols: int) -> None:
+        """Render ASCII temperature graph for a sensor or weather."""
+        name = self._graph_name or "?"
+        hours = self._effective_hours()
+
+        if self._graph_mac:
+            data = self._db.get_graph_data(self._graph_mac, hours)
+        else:
+            # Weather graph
+            data = self._db.get_weather_graph_data(hours)
+
+        lines.append("")
+        lines.append(f"{BOLD}  {name} - Graafi ({self._time_str()}){RESET}")
+        lines.append(f"  {'-' * (cols - 4)}")
+
+        if not data:
+            lines.append(f"  {DIM}Ei dataa{RESET}")
+            lines.append("")
+            lines.append(f"  {DIM}Aikajakso: g {self._graph_mac or 'saa'} 24h, g 1 7d{RESET}")
+            return
+
+        # Determine graph dimensions
+        graph_width = min(cols - 14, 60)  # leave room for labels
+        if hours <= 24:
+            graph_width = min(graph_width, 24)
+        elif hours <= 72:
+            graph_width = min(graph_width, 36)
+        else:
+            graph_width = min(graph_width, 48)
+        graph_height = 8
+
+        graph_str, timeline = self._create_ascii_graph(data, graph_width, graph_height)
+        temps = [t for _, t in data]
+
+        # Indent the graph
+        for graph_line in graph_str.split("\n"):
+            lines.append(f"  {graph_line}")
+        lines.append(f"  {timeline}")
+
+        lines.append("")
+        lines.append(
+            f"  Min: {BOLD}{min(temps):.1f}°C{RESET} | "
+            f"Max: {BOLD}{max(temps):.1f}°C{RESET} | "
+            f"Ka: {BOLD}{sum(temps)/len(temps):.1f}°C{RESET}"
+        )
+        lines.append("")
+        sensor_hint = self._graph_mac or "saa"
+        lines.append(f"  {DIM}Aikajakso: g {sensor_hint} 6h, g {sensor_hint} 7d{RESET}")
+
+    def _create_ascii_graph(
+        self,
+        data: list[tuple[datetime, float]],
+        width: int = 24,
+        height: int = 8,
+    ) -> tuple[str, str]:
+        """Create ASCII art graph from data points."""
+        if not data:
+            return "Ei dataa", ""
+
+        timestamps = [t for t, _ in data]
+        temps = [t for _, t in data]
+        min_temp = min(temps)
+        max_temp = max(temps)
+        temp_range = max_temp - min_temp
+
+        if temp_range == 0:
+            temp_range = 1
+
+        # Sample data to fit width
+        step = max(1, len(data) // width)
+        sampled = [temps[i] for i in range(0, len(data), step)][:width]
+        sampled_times = [timestamps[i] for i in range(0, len(data), step)][:width]
+        actual_width = len(sampled)
+
+        # Build graph
+        graph_lines = []
+        for row in range(height):
+            threshold = max_temp - (row / (height - 1)) * temp_range
+            bar = ""
+            for temp in sampled:
+                if temp >= threshold:
+                    bar += "█"
+                else:
+                    bar += " "
+            if row == 0:
+                graph_lines.append(f"{max_temp:5.1f}°│{bar}│")
+            elif row == height - 1:
+                graph_lines.append(f"{min_temp:5.1f}°│{bar}│")
+            else:
+                graph_lines.append(f"      │{bar}│")
+
+        # Build timeline
+        if sampled_times:
+            first_time = sampled_times[0]
+            last_time = sampled_times[-1]
+            total_h = (last_time - first_time).total_seconds() / 3600
+
+            if total_h <= 24:
+                first_label = first_time.strftime("%H:%M")
+                last_label = last_time.strftime("%H:%M")
+            else:
+                first_label = first_time.strftime("%d.%m")
+                last_label = last_time.strftime("%d.%m")
+
+            padding = actual_width - len(first_label) - len(last_label)
+            if padding > 0:
+                timeline = f"      └{first_label}{' ' * padding}{last_label}┘"
+            else:
+                timeline = f"      └{first_label}{'─' * (actual_width - len(first_label))}┘"
+        else:
+            timeline = ""
+
+        return "\n".join(graph_lines), timeline

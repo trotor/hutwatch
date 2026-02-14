@@ -74,6 +74,11 @@ class WeatherFetcher:
         return self._latest
 
     @property
+    def last_fetch(self) -> Optional[datetime]:
+        """Get the timestamp of the last successful fetch."""
+        return self._last_fetch
+
+    @property
     def location_name(self) -> str:
         """Get the location name."""
         return self._config.location_name
