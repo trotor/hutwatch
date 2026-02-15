@@ -92,15 +92,33 @@ def parse_args() -> argparse.Namespace:
         help="Start API server on this port for remote site sharing",
     )
 
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Launch TUI with fake demo data (no config/BLE/network needed)",
+    )
+
     return parser.parse_args()
 
 
 def main() -> int:
     """Main entry point."""
     args = parse_args()
-    setup_logging(args.verbose, quiet=args.tui)
+    setup_logging(args.verbose, quiet=args.tui or args.demo)
 
     logger = logging.getLogger(__name__)
+
+    # Demo mode: bypass config, BLE, network — launch TUI with fake data
+    if args.demo:
+        from .i18n import init_lang
+        init_lang(args.lang or "fi")
+
+        from .demo import run_demo
+        try:
+            asyncio.run(run_demo())
+            return 0
+        except KeyboardInterrupt:
+            return 0
 
     # Check configuration file
     config_path = args.config.resolve()
