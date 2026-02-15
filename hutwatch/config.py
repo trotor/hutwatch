@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from .i18n import t
-from .models import AppConfig, SensorConfig, SensorType, TelegramConfig, WeatherConfig
+from .models import AppConfig, RemoteSiteConfig, SensorConfig, SensorType, TelegramConfig, WeatherConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,34 @@ def load_config(config_path: Path) -> AppConfig:
 
     language = data.get("language", "fi")
 
+    api_port = data.get("api_port")
+    if api_port is not None:
+        try:
+            api_port = int(api_port)
+        except (ValueError, TypeError):
+            logger.warning("Invalid api_port value: %s", api_port)
+            api_port = None
+
+    remote_sites = []
+    for site_data in data.get("remote_sites", []):
+        try:
+            site = RemoteSiteConfig(
+                name=site_data["name"],
+                url=site_data["url"].rstrip("/"),
+                poll_interval=int(site_data.get("poll_interval", 30)),
+            )
+            remote_sites.append(site)
+            logger.debug("Loaded remote site: %s (%s)", site.name, site.url)
+        except (KeyError, ValueError) as e:
+            logger.warning("Invalid remote site configuration: %s - %s", site_data, e)
+
     config = AppConfig(
         sensors=sensors,
         telegram=telegram_config,
         weather=weather_config,
         language=language,
+        api_port=api_port,
+        remote_sites=remote_sites,
     )
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config

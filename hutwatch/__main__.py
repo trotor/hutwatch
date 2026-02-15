@@ -84,6 +84,14 @@ def parse_args() -> argparse.Namespace:
         help="UI language: fi (Finnish, default) or en (English)",
     )
 
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="Start API server on this port for remote site sharing",
+    )
+
     return parser.parse_args()
 
 
@@ -114,7 +122,7 @@ def main() -> int:
 
     # Run the application
     try:
-        app = HutWatchApp(config_path, console_interval=args.console, use_tui=args.tui)
+        app = HutWatchApp(config_path, console_interval=args.console, use_tui=args.tui, api_port=args.api_port)
         asyncio.run(app.run())
         return 0
     except KeyboardInterrupt:

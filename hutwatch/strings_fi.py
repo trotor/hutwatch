@@ -282,6 +282,10 @@ STRINGS: dict = {
     "tui_geocode_error": "Geokoodausvirhe: {error}",
     "tui_unknown_command": "Tuntematon komento: {cmd}",
 
+    # ── Remote sites ─────────────────────────────────────────────────
+    "remote_offline": "ei yhteyttä",
+    "remote_fetched_ago": "haettu {age} sitten",
+
     # ── Console ───────────────────────────────────────────────────────
     "console_no_data_yet": "Ei anturidataa vielä...",
     "console_header": "Anturilukemat ({count} anturia)",

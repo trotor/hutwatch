@@ -32,3 +32,14 @@ sensors: []
 #   latitude: 60.1699
 #   longitude: 24.9384
 #   location_name: "Helsinki"
+
+# API server for remote site sharing (optional)
+# Exposes sensor data as JSON on the given port.
+# api_port: 8099
+
+# Remote HutWatch instances to monitor (optional)
+# Fetches sensor/weather data from other HutWatch API servers.
+# remote_sites:
+#   - name: "Cabin"
+#     url: "http://100.64.0.2:8099"
+#     poll_interval: 30

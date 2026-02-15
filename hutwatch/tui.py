@@ -76,12 +76,14 @@ class TuiDashboard:
         db: Database,
         weather: Optional[WeatherFetcher] = None,
         app: Optional[object] = None,
+        remote: Optional[object] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._weather = weather
         self._app = app  # HutWatchApp reference for dynamic setup
+        self._remote = remote  # RemotePoller reference
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._start_time = datetime.now()
@@ -816,6 +818,94 @@ class TuiDashboard:
         result.append(f"{uptime_label:<13}{uptime_str}")
         return result
 
+    def _render_remote_site_lines(
+        self,
+        site_name: str,
+        site_data: object,
+        now: datetime,
+    ) -> list[str]:
+        """Render remote site sensor lines for wide layout."""
+        result: list[str] = []
+        result.append("")
+
+        # Site header with fetch age
+        if site_data.online and site_data.last_fetch:
+            fetch_age = (now - site_data.last_fetch).total_seconds()
+            fetch_str = f" {DIM}({t('remote_fetched_ago', age=_format_age(fetch_age))}){RESET}"
+        else:
+            fetch_str = ""
+
+        result.append(f"{BOLD}{site_data.site_name}{RESET}{fetch_str}")
+
+        if not site_data.online:
+            result.append(f"{RED}{t('remote_offline')}{RESET}")
+            return result
+
+        if not site_data.sensors:
+            result.append(f"{DIM}{t('tui_no_sensor_data')}{RESET}")
+            return result
+
+        for s in site_data.sensors:
+            if s.temperature is None:
+                result.append(f"{RED}✗{RESET} {s.order}. {s.name}: {DIM}{t('common_no_connection')}{RESET}")
+                continue
+
+            temp = f"{s.temperature:.1f}°C"
+            humidity = f"{s.humidity:.0f}%" if s.humidity is not None else ""
+
+            # Effective age = sensor age + time since last fetch
+            effective_age = s.age_seconds or 0
+            if site_data.last_fetch:
+                effective_age += (now - site_data.last_fetch).total_seconds()
+            age_str = _format_age(effective_age)
+
+            if effective_age < 300:
+                dot = f"{GREEN}●{RESET}"
+            elif effective_age < 600:
+                dot = f"{YELLOW}●{RESET}"
+            else:
+                dot = f"{RED}●{RESET}"
+
+            parts = [f"{dot} {s.order}. {s.name}: {BOLD}{temp}{RESET}"]
+            if humidity:
+                parts.append(humidity)
+            parts.append(f"{DIM}{age_str}{RESET}")
+            result.append("  ".join(parts))
+
+        return result
+
+    def _render_remote_weather_lines(
+        self,
+        site_data: object,
+        now: datetime,
+    ) -> list[str]:
+        """Render remote site weather lines for wide layout."""
+        result: list[str] = []
+        if not site_data.online or not site_data.weather:
+            return result
+
+        w = site_data.weather
+        from .weather import get_weather_emoji
+        emoji = get_weather_emoji(w.symbol_code)
+        location = w.location or site_data.site_name
+
+        result.append("")
+        result.append(f"{BOLD}{emoji} {location}{RESET}")
+
+        label = f"{t('weather_temperature')}:"
+        result.append(f"{label:<13}{BOLD}{w.temperature:.1f}°C{RESET}")
+        if w.humidity is not None:
+            label = f"{t('weather_humidity')}:"
+            result.append(f"{label:<13}{w.humidity:.0f}%")
+        if w.wind_speed is not None:
+            wind = f"{w.wind_speed:.1f} m/s"
+            if w.wind_direction is not None:
+                wind += f" {wind_direction_text(w.wind_direction)}"
+            label = f"{t('weather_wind')}:"
+            result.append(f"{label:<13}{wind}")
+
+        return result
+
     @staticmethod
     def _visible_len(s: str) -> int:
         """Calculate visible length of a string (excluding ANSI escape codes)."""
@@ -853,12 +943,19 @@ class TuiDashboard:
         readings: dict,
     ) -> None:
         """Render dashboard in wide two-column layout (cols >= 110)."""
-        # Left column: sensors + 24h summary
+        # Left column: sensors + 24h summary + remote sensors
         left = self._render_sensor_lines(cols, now, ordered_macs, device_map, readings)
         left.extend(self._render_24h_summary_lines(ordered_macs, device_map))
 
-        # Right column: weather + status
+        # Right column: weather + remote weather + status
         right = self._render_weather_lines(now)
+
+        # Remote sites
+        if self._remote:
+            for name, site_data in self._remote.get_all_site_data().items():
+                left.extend(self._render_remote_site_lines(name, site_data, now))
+                right.extend(self._render_remote_weather_lines(site_data, now))
+
         right.extend(self._render_status_lines(now, ordered_macs, device_map, readings))
 
         lines.append("")
@@ -922,6 +1019,16 @@ class TuiDashboard:
 
         # Weather
         self._render_weather(lines, cols)
+
+        # Remote sites
+        if self._remote:
+            for name, site_data in self._remote.get_all_site_data().items():
+                remote_lines = self._render_remote_site_lines(name, site_data, now)
+                for rl in remote_lines:
+                    lines.append(f"  {rl}" if rl else "")
+                remote_weather = self._render_remote_weather_lines(site_data, now)
+                for rw in remote_weather:
+                    lines.append(f"  {rw}" if rw else "")
 
         # Status
         if self._show_status:

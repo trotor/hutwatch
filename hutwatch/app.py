@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from .aggregator import Aggregator
+from .api import ApiServer
 from .ble.scanner import BleScanner
 from .ble.sensor_store import SensorStore
 from .config import load_config
@@ -16,6 +17,7 @@ from .console import ConsoleReporter
 from .db import Database
 from .i18n import t
 from .models import AppConfig, WeatherConfig
+from .remote import RemotePoller
 from .tui import TuiDashboard
 from .weather import WeatherFetcher
 
@@ -39,11 +41,13 @@ class HutWatchApp:
         db_path: Optional[Path] = None,
         console_interval: Optional[int] = None,
         use_tui: bool = False,
+        api_port: Optional[int] = None,
     ) -> None:
         self._config_path = config_path
         self._db_path = db_path or config_path.parent / "hutwatch.db"
         self._console_interval = console_interval
         self._use_tui = use_tui
+        self._api_port = api_port
         self._config: Optional[AppConfig] = None
         self._store: Optional[SensorStore] = None
         self._db: Optional[Database] = None
@@ -53,6 +57,8 @@ class HutWatchApp:
         self._bot: Optional["TelegramBot"] = None
         self._console: Optional[ConsoleReporter] = None
         self._tui: Optional[TuiDashboard] = None
+        self._api: Optional[ApiServer] = None
+        self._remote: Optional[RemotePoller] = None
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
         self._scanner_task: Optional[asyncio.Task] = None
@@ -104,6 +110,17 @@ class HutWatchApp:
         self._scanner = BleScanner(self._config, self._store, db=self._db)
         self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
+        # Start API server if configured (CLI --api-port wins over config)
+        api_port = self._api_port or self._config.api_port
+        if api_port:
+            self._api = ApiServer(self._config, self._store, self._db, self._weather, api_port)
+            await self._api.start()
+
+        # Start remote poller if configured
+        if self._config.remote_sites:
+            self._remote = RemotePoller(self._config.remote_sites)
+            await self._remote.start()
+
         # Determine local mode (--console or --tui skip Telegram)
         _local_mode = self._use_tui or self._console_interval is not None
 
@@ -139,13 +156,14 @@ class HutWatchApp:
             if self._use_tui:
                 self._tui = TuiDashboard(
                     self._config, self._store, self._db, self._weather,
-                    app=self,
+                    app=self, remote=self._remote,
                 )
                 await self._tui.start()
             else:
                 interval = self._console_interval if self._console_interval is not None else 30
                 self._console = ConsoleReporter(
                     self._config, self._store, self._db, interval=interval,
+                    remote=self._remote,
                 )
                 await self._console.start()
 
@@ -183,6 +201,13 @@ class HutWatchApp:
             except asyncio.CancelledError:
                 pass
             self._scanner_task = None
+
+        # Stop remote poller and API server first
+        if self._remote:
+            await self._remote.stop()
+
+        if self._api:
+            await self._api.stop()
 
         # Stop components in reverse order
         if self._tui:
@@ -225,6 +250,10 @@ class HutWatchApp:
         # Update TUI reference
         if self._tui:
             self._tui.set_weather(self._weather)
+
+        # Update API server reference
+        if self._api:
+            self._api.set_weather(self._weather)
 
         # Persist to database for next startup
         if self._db:

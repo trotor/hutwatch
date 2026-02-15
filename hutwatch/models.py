@@ -80,6 +80,15 @@ class WeatherData:
 
 
 @dataclass
+class RemoteSiteConfig:
+    """Configuration for a remote HutWatch instance."""
+
+    name: str
+    url: str
+    poll_interval: int = 30
+
+
+@dataclass
 class AppConfig:
     """Application configuration."""
 
@@ -87,6 +96,8 @@ class AppConfig:
     telegram: Optional[TelegramConfig] = None
     weather: Optional[WeatherConfig] = None
     language: str = "fi"
+    api_port: Optional[int] = None
+    remote_sites: list[RemoteSiteConfig] = field(default_factory=list)
 
     def get_sensor_by_mac(self, mac: str) -> Optional[SensorConfig]:
         """Get sensor config by MAC address."""

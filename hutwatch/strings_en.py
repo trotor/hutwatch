@@ -284,6 +284,10 @@ STRINGS: dict = {
     "tui_geocode_error": "Geocoding error: {error}",
     "tui_unknown_command": "Unknown command: {cmd}",
 
+    # ── Remote sites ─────────────────────────────────────────────────
+    "remote_offline": "offline",
+    "remote_fetched_ago": "fetched {age} ago",
+
     # ── Console ───────────────────────────────────────────────────────
     "console_no_data_yet": "No sensor data yet...",
     "console_header": "Sensor Readings ({count} sensors)",

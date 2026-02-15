@@ -32,11 +32,13 @@ class ConsoleReporter:
         store: SensorStore,
         db: Database,
         interval: int = DEFAULT_INTERVAL_SECONDS,
+        remote: Optional[object] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._interval = interval
+        self._remote = remote
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -171,3 +173,78 @@ class ConsoleReporter:
         lines.append(separator)
 
         print("\n".join(lines))
+
+        # Print remote sites
+        if self._remote:
+            for site_name, site_data in self._remote.get_all_site_data().items():
+                self._print_remote_site(site_name, site_data)
+
+    def _print_remote_site(self, site_name: str, site_data: object) -> None:
+        """Print a remote site's sensor readings."""
+        now = datetime.now()
+
+        if not site_data.online:
+            print(f"\n  [{site_data.site_name}] {t('remote_offline')}")
+            return
+
+        if not site_data.sensors:
+            return
+
+        rows: list[tuple[str, str, str, str, str]] = []
+        for s in site_data.sensors:
+            if s.temperature is None:
+                continue
+
+            temp = f"{s.temperature:.1f}C"
+            humidity = f"{s.humidity:.0f}%" if s.humidity is not None else "-"
+
+            if s.battery_percent is not None:
+                battery = f"{s.battery_percent}%"
+            elif s.battery_voltage is not None:
+                battery = f"{s.battery_voltage:.2f}V"
+            else:
+                battery = "-"
+
+            # Effective age = sensor age + time since fetch
+            effective_age = s.age_seconds or 0
+            if site_data.last_fetch:
+                effective_age += (now - site_data.last_fetch).total_seconds()
+            if effective_age < 60:
+                age_str = t("time_ago_seconds", n=int(effective_age))
+            else:
+                age_str = t("time_ago_minutes", n=int(effective_age / 60))
+
+            rows.append((s.name, temp, humidity, battery, age_str))
+
+        if not rows:
+            return
+
+        col_sensor = t("console_col_sensor")
+        col_temp = t("console_col_temp")
+        col_hum = t("console_col_humidity")
+        col_batt = t("console_col_battery")
+        col_age = t("console_col_age")
+
+        name_w = max(len(r[0]) for r in rows)
+        name_w = max(name_w, len(col_sensor))
+
+        fetch_info = ""
+        if site_data.last_fetch:
+            fetch_age = (now - site_data.last_fetch).total_seconds()
+            fetch_info = f" ({t('remote_fetched_ago', age=f'{int(fetch_age)}s')})"
+
+        header = f"{col_sensor:<{name_w}}  {col_temp:>7}  {col_hum:>5}  {col_batt:>6}  {col_age:>7}"
+        separator = "-" * len(header)
+
+        output = [
+            "",
+            f"[{site_data.site_name}] {len(rows)} sensors{fetch_info}",
+            separator,
+            header,
+            separator,
+        ]
+        for name, temp, hum, batt, age in rows:
+            output.append(f"{name:<{name_w}}  {temp:>7}  {hum:>5}  {batt:>6}  {age:>7}")
+        output.append(separator)
+
+        print("\n".join(output))
