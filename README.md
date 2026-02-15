@@ -12,10 +12,12 @@ BLE temperature monitoring with a Telegram bot and terminal UI. Reads temperatur
 - Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) support
 - Continuous auto-discovery: new sensors are found automatically even when some are pre-configured
 - Outdoor weather from MET Norway API (yr.no), updated hourly
+- **Multi-site monitoring**: built-in API server and remote polling — monitor multiple locations (e.g. home + cabin) over Tailscale or VPN
 - **Three UI modes:**
   - **Telegram bot**: `/temps`, `/weather`, `/history`, `/stats`, `/graph`, `/menu`
   - **TUI dashboard**: interactive ASCII terminal view (temperatures, weather, stats, graphs, device management)
   - **Console output**: simple table output at intervals or on keypress
+- **Summary mode**: toggleable 24h min-max display — compact inline or expanded statistics
 - SQLite database for long-term history
 - 24h in-memory cache + 90-day database history
 - Site naming and weather location setting from TUI (persisted to database)
@@ -85,6 +87,17 @@ sensors: []
 #   latitude: 60.1699
 #   longitude: 24.9384
 #   location_name: "Helsinki"
+
+# API server for remote site sharing (optional)
+# Exposes sensor data as JSON on the given port.
+# api_port: 8099
+
+# Remote HutWatch instances to monitor (optional)
+# Fetches sensor/weather data from other HutWatch API servers.
+# remote_sites:
+#   - name: "Cabin"
+#     url: "http://100.64.0.2:8099"
+#     poll_interval: 30
 ```
 
 ### Creating a Telegram Bot
@@ -131,6 +144,7 @@ Interactive ASCII dashboard with the following commands:
 | `w <lat> <lon>` | Set weather by coordinates |
 | `wr` | Refresh weather now |
 | `t` | Toggle status section |
+| `y` | Toggle summary mode (inline min-max / expanded 24h stats) |
 | `r` / Enter | Refresh / back to dashboard |
 | `q` | Quit |
 
@@ -205,6 +219,44 @@ The `/menu` or `/start` command opens an interactive menu with inline buttons:
 - History 1d / 7d / 30d
 - Statistics 1d / 7d / 30d
 - Refresh button in every view
+
+## Multi-Site Monitoring (Remote Sites)
+
+HutWatch can monitor multiple locations by connecting instances over a network (e.g. Tailscale or VPN). Each site runs its own HutWatch with a built-in API server, and a central instance polls data from all remote sites.
+
+### How It Works
+
+1. **API server**: Each HutWatch instance can expose its sensor and weather data as JSON via a built-in HTTP API (`/api/v1/status`).
+2. **Remote poller**: A HutWatch instance can poll one or more remote API servers and display their data alongside local sensors.
+
+### Example: Home + Cabin
+
+**Cabin** (remote site) — runs HutWatch with the API server enabled:
+
+```yaml
+# config.yaml on cabin
+sensors: []
+api_port: 8099
+```
+
+```bash
+./venv/bin/python -m hutwatch -c config.yaml --tui
+```
+
+**Home** (central site) — polls the cabin over Tailscale:
+
+```yaml
+# config.yaml at home
+sensors: []
+api_port: 8099
+
+remote_sites:
+  - name: "Cabin"
+    url: "http://100.64.0.2:8099"   # Tailscale IP of cabin
+    poll_interval: 30
+```
+
+The TUI dashboard and console output show remote site sensors and weather alongside local data. The API port can also be set via the `--api-port` CLI flag.
 
 ## macOS: Background Service and Desktop Widget
 

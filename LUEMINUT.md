@@ -12,10 +12,12 @@ BLE-lämpötilaseuranta Telegram-botilla ja terminaalikäyttöliittymällä. Luk
 - Xiaomi LYWSD03MMC (ATC/PVVX custom firmware) tuki
 - Jatkuva autodiscovery: uudet anturit löytyvät automaattisesti myös kun sensoreita on jo konfiguroitu
 - Ulkosää MET Norway API:sta (yr.no), 1h päivitysvälillä
+- **Monen paikan seuranta**: sisäänrakennettu API-palvelin ja etäkysely — seuraa useita kohteita (esim. koti + mökki) Tailscalen tai VPN:n yli
 - **Kolme käyttöliittymää:**
   - **Telegram-botti**: `/temps`, `/weather`, `/history`, `/stats`, `/graph`, `/menu`
   - **TUI-dashboard**: ASCII-pohjainen terminaalinäkymä (lämpötilat, sää, tilastot, graafit, laitteiden hallinta)
   - **Konsolituloste**: yksinkertainen taulukkotuloste määrävälein tai Enterillä
+- **Yhteenvetotila**: vaihdettava 24h min-max -näkymä — tiivis rivinäkymä tai laajennetut tilastot
 - SQLite-tietokanta pitkäaikaishistorialle
 - 24h muistivälimuisti + 90 päivän tietokantahistoria
 - Paikan nimeäminen ja sääpaikan asetus TUI:sta (tallennetaan tietokantaan)
@@ -85,6 +87,17 @@ sensors: []
 #   latitude: 60.1699
 #   longitude: 24.9384
 #   location_name: "Helsinki"
+
+# API-palvelin etäkäyttöä varten (valinnainen)
+# Tarjoaa anturidatan JSON-muodossa annetusta portista.
+# api_port: 8099
+
+# Etä-HutWatch-instanssit seurattavaksi (valinnainen)
+# Hakee anturi- ja säädatan muilta HutWatch API-palvelimilta.
+# remote_sites:
+#   - name: "Mökki"
+#     url: "http://100.64.0.2:8099"
+#     poll_interval: 30
 ```
 
 ### Telegram-botin luonti
@@ -131,6 +144,7 @@ Interaktiivinen ASCII-dashboard jossa:
 | `w <lat> <lon>` | Aseta sää koordinaateilla |
 | `wr` | Päivitä sää heti |
 | `t` | Näytä/piilota status-osio |
+| `y` | Vaihda yhteenvetotila (min-max rivissä / laajennetut 24h-tilastot) |
 | `r` / Enter | Päivitä / takaisin dashboardiin |
 | `q` | Lopeta |
 
@@ -205,6 +219,44 @@ Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
 - Historia 1d / 7d / 30d
 - Tilastot 1d / 7d / 30d
 - Päivitä-nappi jokaisessa näkymässä
+
+## Monen paikan seuranta (etäkohteet)
+
+HutWatch voi seurata useita kohteita yhdistämällä instanssit verkon yli (esim. Tailscale tai VPN). Jokainen kohde ajaa omaa HutWatchia sisäänrakennetulla API-palvelimella, ja keskusinstanssi kyselee dataa kaikilta etäkohteilta.
+
+### Toimintaperiaate
+
+1. **API-palvelin**: Jokainen HutWatch-instanssi voi tarjota anturi- ja säädatansa JSON-muodossa HTTP-rajapinnan kautta (`/api/v1/status`).
+2. **Etäkysely**: HutWatch-instanssi voi kysellä yhtä tai useampaa etä-API-palvelinta ja näyttää niiden datan paikallisten anturien rinnalla.
+
+### Esimerkki: koti + mökki
+
+**Mökki** (etäkohde) — ajaa HutWatchia API-palvelin päällä:
+
+```yaml
+# config.yaml mökillä
+sensors: []
+api_port: 8099
+```
+
+```bash
+./venv/bin/python -m hutwatch -c config.yaml --tui
+```
+
+**Koti** (keskuskohde) — kyselee mökin dataa Tailscalen yli:
+
+```yaml
+# config.yaml kotona
+sensors: []
+api_port: 8099
+
+remote_sites:
+  - name: "Mökki"
+    url: "http://100.64.0.2:8099"   # Mökin Tailscale-IP
+    poll_interval: 30
+```
+
+TUI-dashboard ja konsolituloste näyttävät etäkohteiden anturit ja sään paikallisten tietojen rinnalla. API-portin voi asettaa myös `--api-port`-lipulla komentorivillä.
 
 ## macOS: taustapalvelu ja työpöytäwidget
 
