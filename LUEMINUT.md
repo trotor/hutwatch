@@ -140,7 +140,7 @@ Interaktiivinen ASCII-dashboard jossa:
 | `d` | Laitelista |
 | `n <n> <nimi>` | Nimeä anturi (esim. `n 1 Olohuone`) |
 | `p <nimi>` | Nimeä paikka (esim. `p Mökki`) |
-| `w <paikka>` | Aseta sääpaikka (esim. `w Toivala`) |
+| `w <paikka>` | Aseta sääpaikka (esim. `w Helsinki`) |
 | `w <lat> <lon>` | Aseta sää koordinaateilla |
 | `wr` | Päivitä sää heti |
 | `t` | Näytä/piilota status-osio |

@@ -4,8 +4,8 @@
 // Displays sensor temperatures and weather from HutWatch SQLite database.
 // Adjust PYTHON_PATH and DB_PATH below to match your installation.
 
-const PYTHON_PATH = "/Users/teroronkko/code/hutwatch/venv/bin/python3";
-const DB_PATH = "/Users/teroronkko/code/hutwatch/hutwatch.db";
+const PYTHON_PATH = "/path/to/hutwatch/venv/bin/python3";
+const DB_PATH = "/path/to/hutwatch/hutwatch.db";
 
 export const refreshFrequency = 30000; // 30 seconds
 

@@ -263,13 +263,13 @@ STRINGS: dict = {
     "tui_rename_alias_cleared": "Alias poistettu: {name}",
     "tui_rename_success": "Nimetty uudelleen: {old} -> {new}",
     "tui_site_name_current": "Paikan nimi: {name}  (tyhjennä: p -)",
-    "tui_site_name_usage": "Käyttö: p <nimi>  (esim. p Mökki Toivalassa)",
+    "tui_site_name_usage": "Käyttö: p <nimi>  (esim. p Mökki)",
     "tui_site_name_cleared": "Paikan nimi poistettu",
     "tui_site_name_set": "Paikan nimi asetettu: {name}",
     "tui_weather_cmd_not_supported": "Sään asetus ei tuettu tässä tilassa",
     "tui_weather_cmd_usage": (
         "Käyttö: w <paikka>  tai  w <lat> <lon> [nimi]\n"
-        "  Esim: w Toivala  tai  w 62.99 27.73 Toivala"
+        "  Esim: w Helsinki  tai  w 60.17 24.94 Helsinki"
     ),
     "tui_weather_setting": "Asetetaan sää: {name}...",
     "tui_weather_searching": "Haetaan paikkaa: {query}...",
