@@ -216,6 +216,7 @@ STRINGS: dict = {
     "tui_cmd_devices": "[d] devices",
     "tui_cmd_graph": "[g <n>] graph",
     "tui_cmd_status_toggle": "[t] status",
+    "tui_cmd_summary_toggle": "[y] summary",
     "tui_cmd_rename": "[n <n> <name>] rename",
     "tui_cmd_site_name": "[p <name>] site",
     "tui_cmd_weather_refresh": "[wr] refresh weather",
@@ -255,6 +256,8 @@ STRINGS: dict = {
     # ── TUI: command feedback ─────────────────────────────────────────
     "tui_status_toggle_visible": "Status section visible",
     "tui_status_toggle_hidden": "Status section hidden",
+    "tui_summary_toggle_expanded": "Expanded summary visible",
+    "tui_summary_toggle_inline": "Compact summary (min–max inline)",
     "tui_graph_usage": "Usage: g <sensor> [time]  (e.g. g 1, g 1 7d, g weather)",
     "tui_graph_weather_not_available": "Weather not available",
     "tui_sensor_not_found": "Sensor '{identifier}' not found",

@@ -56,6 +56,7 @@ class TuiDashboard:
       r / Enter  - refresh current view
       q          - quit
       t          - toggle status section visibility
+      y          - toggle summary mode (inline min-max / expanded)
       h [period] - history (e.g. h, h 1d, h 7d)
       s [period] - stats (e.g. s, s 7d)
       d          - devices list
@@ -101,6 +102,7 @@ class TuiDashboard:
         self._graph_name: Optional[str] = None
         self._status_msg: Optional[str] = None  # one-shot feedback message
         self._show_status: bool = True  # toggle with 't' command
+        self._show_summary: bool = False  # toggle with 'y': False=inline min-max, True=expanded
 
     def set_weather(self, weather: WeatherFetcher) -> None:
         """Update weather fetcher reference (called by app after dynamic setup)."""
@@ -232,6 +234,11 @@ class TuiDashboard:
         if cmd == "t":
             self._show_status = not self._show_status
             self._status_msg = t("tui_status_toggle_visible") if self._show_status else t("tui_status_toggle_hidden")
+            return
+
+        if cmd == "y":
+            self._show_summary = not self._show_summary
+            self._status_msg = t("tui_summary_toggle_expanded") if self._show_summary else t("tui_summary_toggle_inline")
             return
 
         if cmd == "h":
@@ -588,6 +595,7 @@ class TuiDashboard:
         if self._view == "dashboard":
             cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph")]
             cmds.append(t("tui_cmd_status_toggle"))
+            cmds.append(t("tui_cmd_summary_toggle"))
             cmds.append(t("tui_cmd_rename"))
             cmds.append(t("tui_cmd_site_name"))
             if self._weather:
@@ -663,6 +671,13 @@ class TuiDashboard:
                 if humidity:
                     parts.append(humidity)
                 parts.append(f"{DIM}{age_str}{RESET}")
+
+                # Inline 24h min-max when summary is not expanded
+                if not self._show_summary:
+                    stats = self._db.get_stats(mac, hours=24)
+                    if stats:
+                        parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
+
                 result.append("  ".join(parts))
 
         return result
@@ -943,18 +958,21 @@ class TuiDashboard:
         readings: dict,
     ) -> None:
         """Render dashboard in wide two-column layout (cols >= 110)."""
-        # Left column: sensors + 24h summary + remote sensors
+        # Left column: all sensors (local + remote), then expanded summary if toggled
         left = self._render_sensor_lines(cols, now, ordered_macs, device_map, readings)
-        left.extend(self._render_24h_summary_lines(ordered_macs, device_map))
 
-        # Right column: weather + remote weather + status
+        # Right column: weather (local + remote) + status
         right = self._render_weather_lines(now)
 
-        # Remote sites
+        # Remote sites: sensors on left, weather on right
         if self._remote:
             for name, site_data in self._remote.get_all_site_data().items():
                 left.extend(self._render_remote_site_lines(name, site_data, now))
                 right.extend(self._render_remote_weather_lines(site_data, now))
+
+        # Expanded summary below all sensors (only when toggled)
+        if self._show_summary:
+            left.extend(self._render_24h_summary_lines(ordered_macs, device_map))
 
         right.extend(self._render_status_lines(now, ordered_macs, device_map, readings))
 
@@ -1012,20 +1030,32 @@ class TuiDashboard:
                 if humidity:
                     parts.append(humidity)
                 parts.append(f"{DIM}{age_str}{RESET}")
+
+                # Inline 24h min-max when summary is not expanded
+                if not self._show_summary:
+                    stats = self._db.get_stats(mac, hours=24)
+                    if stats:
+                        parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
+
                 lines.append("  ".join(parts))
 
-        # 24h summary (inline)
-        self._render_24h_summary(lines, cols, ordered_macs, device_map)
-
-        # Weather
-        self._render_weather(lines, cols)
-
-        # Remote sites
+        # Remote sites (sensors only, grouped with local sensors)
         if self._remote:
             for name, site_data in self._remote.get_all_site_data().items():
                 remote_lines = self._render_remote_site_lines(name, site_data, now)
                 for rl in remote_lines:
                     lines.append(f"  {rl}" if rl else "")
+
+        # Expanded 24h summary (only when toggled)
+        if self._show_summary:
+            self._render_24h_summary(lines, cols, ordered_macs, device_map)
+
+        # Weather (local)
+        self._render_weather(lines, cols)
+
+        # Remote weather
+        if self._remote:
+            for name, site_data in self._remote.get_all_site_data().items():
                 remote_weather = self._render_remote_weather_lines(site_data, now)
                 for rw in remote_weather:
                     lines.append(f"  {rw}" if rw else "")

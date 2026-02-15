@@ -214,6 +214,7 @@ STRINGS: dict = {
     "tui_cmd_devices": "[d] laitteet",
     "tui_cmd_graph": "[g <n>] graafi",
     "tui_cmd_status_toggle": "[t] tila",
+    "tui_cmd_summary_toggle": "[y] yhteenveto",
     "tui_cmd_rename": "[n <n> <nimi>] nimeä",
     "tui_cmd_site_name": "[p <nimi>] paikka",
     "tui_cmd_weather_refresh": "[wr] päivitä sää",
@@ -253,6 +254,8 @@ STRINGS: dict = {
     # ── TUI: command feedback ─────────────────────────────────────────
     "tui_status_toggle_visible": "Status-osio näkyvillä",
     "tui_status_toggle_hidden": "Status-osio piilotettu",
+    "tui_summary_toggle_expanded": "Laajennettu yhteenveto näkyvillä",
+    "tui_summary_toggle_inline": "Tiivistetty yhteenveto (min–max rivissä)",
     "tui_graph_usage": "Kaytto: g <anturi> [aika]  (esim. g 1, g 1 7d, g saa)",
     "tui_graph_weather_not_available": "Saa ei kaytossa",
     "tui_sensor_not_found": "Anturia '{identifier}' ei loytynyt",

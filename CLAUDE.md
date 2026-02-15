@@ -149,6 +149,7 @@ Interactive ASCII dashboard (`--tui`):
 - `w <lat> <lon>` — Set weather location by coordinates
 - `wr` — Refresh weather now
 - `t` — Toggle status section
+- `y` — Toggle summary mode (inline min-max / expanded)
 - `r` / Enter — Refresh / back to dashboard
 - `q` — Quit
 
