@@ -150,6 +150,15 @@ Interactive ASCII dashboard with the following commands:
 
 Weather location and site name are stored in the database and persist across restarts.
 
+### Demo Mode
+
+Try the TUI without any hardware, config, or network — uses fake sensor data in-memory:
+
+```bash
+./venv/bin/python -m hutwatch --demo          # Finnish
+./venv/bin/python -m hutwatch --demo --lang en # English
+```
+
 ### Console Output
 
 ```bash

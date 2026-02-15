@@ -32,6 +32,9 @@ python3 -m venv venv
 # TUI in English
 ./venv/bin/python -m hutwatch -c config.yaml --tui --lang en
 
+# Demo mode (no config/BLE/network needed)
+./venv/bin/python -m hutwatch --demo
+
 # Console output every 60s
 ./venv/bin/python -m hutwatch -c config.yaml --console 60
 
@@ -69,6 +72,7 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
 3. UI commands query both SensorStore (recent) and Database (historical)
 
 **UI Mode Selection** (mutually exclusive):
+- `--demo` → TuiDashboard with fake data (no config/BLE/network needed, in-memory SQLite)
 - `--tui` → TuiDashboard (interactive, suppresses logging)
 - `--console [N]` → ConsoleReporter (keypress or timed interval)
 - Neither → TelegramBot if configured, else ConsoleReporter with 30s default

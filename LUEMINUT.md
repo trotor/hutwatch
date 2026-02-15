@@ -150,6 +150,15 @@ Interaktiivinen ASCII-dashboard jossa:
 
 Sääpaikka ja paikan nimi tallentuvat tietokantaan — säilyvät uudelleenkäynnistysten yli.
 
+### Demotila
+
+Kokeile TUI:ta ilman laitteistoa, konfiguraatiota tai verkkoa — käyttää testitietoja muistissa:
+
+```bash
+./venv/bin/python -m hutwatch --demo          # Suomeksi
+./venv/bin/python -m hutwatch --demo --lang en # Englanniksi
+```
+
 ### Konsolituloste
 
 ```bash
