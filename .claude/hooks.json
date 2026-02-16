@@ -1,0 +1,28 @@
+{
+  "hooks": [
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Edit",
+        "filePath": "hutwatch/strings_"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_i18n.py"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Write",
+        "filePath": "hutwatch/strings_"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_i18n.py"
+        }
+      ]
+    }
+  ]
+}

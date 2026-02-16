@@ -28,5 +28,7 @@ scan_test.py
 scan_all.py
 get_chat_id.py
 
-# Claude
-.claude/
+# Claude - ignore personal settings, track shared config
+.claude/*
+!.claude/commands/
+!.claude/hooks.json
