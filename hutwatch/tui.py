@@ -11,6 +11,13 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+try:
+    import termios
+    import tty
+    _HAS_TERMIOS = True
+except ImportError:
+    _HAS_TERMIOS = False
+
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .i18n import t, wind_direction_text
@@ -30,6 +37,11 @@ RED = "\033[31m"
 
 # Refresh interval for auto-update (seconds)
 AUTO_REFRESH_SECONDS = 10
+
+# Keys that execute instantly without Enter
+_INSTANT_KEYS = frozenset('qtydr')
+# Keys that start input mode (may need arguments, confirmed with Enter)
+_INPUT_KEYS = frozenset('hsgnpw')
 
 
 def _format_age(seconds: float) -> str:
@@ -52,22 +64,26 @@ class TuiDashboard:
       devices    - device list with MAC, type, alias
       graph      - ASCII temperature graph for a sensor
 
-    Commands (type + Enter):
-      r / Enter  - refresh current view
-      q          - quit
-      t          - toggle status section visibility
-      y          - toggle summary mode (inline min-max / expanded)
-      h [period] - history (e.g. h, h 1d, h 7d)
-      s [period] - stats (e.g. s, s 7d)
-      d          - devices list
-      g <n> [period] - graph for sensor n (e.g. g 1, g 1 7d)
-      n <n> <name>   - rename device (e.g. n 1 Olohuone)
-      n <n> -              - clear device alias
-      p <name>             - name this site (e.g. p Mökki)
-      p -                  - clear site name
-      w <place>            - set weather by place name (geocoding)
-      w <lat> <lon> [name] - set weather by coordinates
-      wr                   - refresh weather now
+    Input modes:
+      Instant keys (no Enter needed):
+        q          - quit
+        t          - toggle status section visibility
+        y          - toggle summary mode (inline min-max / expanded)
+        d          - devices list
+        r          - refresh current view
+        Enter      - refresh / back to dashboard
+
+      Input mode (type + Enter, ESC to cancel, Backspace to edit):
+        h [period] - history (e.g. h, h 1d, h 7d)
+        s [period] - stats (e.g. s, s 7d)
+        g <n> [period] - graph for sensor n (e.g. g 1, g 1 7d)
+        n <n> <name>   - rename device (e.g. n 1 Olohuone)
+        n <n> -              - clear device alias
+        p <name>             - name this site (e.g. p Mökki)
+        p -                  - clear site name
+        w <place>            - set weather by place name (geocoding)
+        w <lat> <lon> [name] - set weather by coordinates
+        wr                   - refresh weather now
     """
 
     def __init__(
@@ -103,6 +119,9 @@ class TuiDashboard:
         self._status_msg: Optional[str] = None  # one-shot feedback message
         self._show_status: bool = True  # toggle with 't' command
         self._show_summary: bool = False  # toggle with 'y': False=inline min-max, True=expanded
+        self._input_mode = False  # True when building a command line
+        self._input_buffer = ""   # Accumulated input in input mode
+        self._old_term_settings = None  # Saved terminal settings for cbreak restore
 
     def set_weather(self, weather: WeatherFetcher) -> None:
         """Update weather fetcher reference (called by app after dynamic setup)."""
@@ -113,6 +132,15 @@ class TuiDashboard:
         self._running = True
         self._task = asyncio.create_task(self._run(), name="tui_dashboard")
         logger.info("TUI dashboard started")
+
+    def _restore_terminal(self) -> None:
+        """Restore terminal settings from cbreak mode."""
+        if self._old_term_settings is not None:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_term_settings)
+                self._old_term_settings = None
+            except (termios.error, OSError):
+                pass
 
     async def stop(self) -> None:
         """Stop the TUI dashboard."""
@@ -132,24 +160,93 @@ class TuiDashboard:
                 pass
             self._task = None
 
+        self._restore_terminal()
+
         # Show cursor again
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
     async def _run(self) -> None:
-        """Main loop: render dashboard and handle input."""
+        """Main loop: render dashboard and handle input.
+
+        Uses cbreak mode for instant single-key commands (q, t, y, d, r).
+        Commands that take arguments (h, s, g, n, p, w) enter input mode
+        where characters accumulate and Enter executes the command.
+        """
         loop = asyncio.get_running_loop()
         input_event = asyncio.Event()
-        input_line = ""
+        input_cmd = ""
         quit_requested = False
 
-        def _on_stdin() -> None:
-            nonlocal input_line, quit_requested
-            line = sys.stdin.readline().strip()
-            input_line = line
-            if line.lower() in ("q", "quit"):
-                quit_requested = True
-            input_event.set()
+        # Try to set cbreak mode for instant single-key commands
+        cbreak_ok = False
+        if _HAS_TERMIOS and sys.stdin.isatty():
+            try:
+                self._old_term_settings = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin.fileno())
+                cbreak_ok = True
+            except (termios.error, OSError):
+                self._old_term_settings = None
+
+        if cbreak_ok:
+            def _on_stdin() -> None:
+                nonlocal input_cmd, quit_requested
+                ch = sys.stdin.read(1)
+                if not ch:
+                    return
+
+                if not self._input_mode:
+                    # Idle mode: single keypress handling
+                    key = ch.lower()
+                    if ch == '\n':
+                        # Enter = refresh / back to dashboard
+                        input_cmd = ""
+                        input_event.set()
+                    elif key == 'q':
+                        quit_requested = True
+                        input_event.set()
+                    elif key in _INSTANT_KEYS:
+                        input_cmd = key
+                        input_event.set()
+                    elif key in _INPUT_KEYS:
+                        # Enter input mode: accumulate chars until Enter
+                        self._input_mode = True
+                        self._input_buffer = key
+                        self._render()
+                    # else: ignore unknown keys
+                else:
+                    # Input mode: accumulate characters, Enter to execute
+                    if ch == '\n':
+                        input_cmd = self._input_buffer
+                        self._input_mode = False
+                        self._input_buffer = ""
+                        input_event.set()
+                    elif ch == '\x1b':
+                        # ESC = cancel input
+                        self._input_mode = False
+                        self._input_buffer = ""
+                        self._render()
+                    elif ch in ('\x7f', '\b'):
+                        # Backspace
+                        if len(self._input_buffer) > 1:
+                            self._input_buffer = self._input_buffer[:-1]
+                        else:
+                            self._input_mode = False
+                            self._input_buffer = ""
+                        self._render()
+                    elif ch >= ' ':
+                        # Printable character
+                        self._input_buffer += ch
+                        self._render()
+        else:
+            # Fallback: readline-based input (no cbreak support)
+            def _on_stdin() -> None:
+                nonlocal input_cmd, quit_requested
+                line = sys.stdin.readline().strip()
+                input_cmd = line
+                if line.lower() in ("q", "quit"):
+                    quit_requested = True
+                input_event.set()
 
         try:
             loop.add_reader(sys.stdin, _on_stdin)
@@ -163,55 +260,58 @@ class TuiDashboard:
         # Wait for initial data
         await asyncio.sleep(3)
 
-        while self._running:
-            self._render()
-            input_event.clear()
+        try:
+            while self._running:
+                self._render()
+                input_event.clear()
 
-            try:
-                await asyncio.wait_for(input_event.wait(), timeout=AUTO_REFRESH_SECONDS)
-            except asyncio.TimeoutError:
-                self._status_msg = None
-                continue
+                try:
+                    await asyncio.wait_for(input_event.wait(), timeout=AUTO_REFRESH_SECONDS)
+                except asyncio.TimeoutError:
+                    self._status_msg = None
+                    continue
 
-            if quit_requested:
-                self._running = False
-                import signal
-                os.kill(os.getpid(), signal.SIGINT)
-                return
+                if quit_requested:
+                    self._running = False
+                    import signal
+                    os.kill(os.getpid(), signal.SIGINT)
+                    return
 
-            self._handle_command(input_line)
-            input_line = ""
+                self._handle_command(input_cmd)
+                input_cmd = ""
 
-            # Handle pending async actions
-            if self._pending_geocode:
-                query = self._pending_geocode
-                self._pending_geocode = None
-                result = await self._geocode(query)
-                if result:
-                    lat, lon, display_name = result
+                # Handle pending async actions
+                if self._pending_geocode:
+                    query = self._pending_geocode
+                    self._pending_geocode = None
+                    result = await self._geocode(query)
+                    if result:
+                        lat, lon, display_name = result
+                        try:
+                            await self._app.setup_weather(lat, lon, display_name)
+                            self._status_msg = t("tui_weather_set", name=display_name, lat=f"{lat:.4f}", lon=f"{lon:.4f}")
+                        except Exception as e:
+                            self._status_msg = t("tui_weather_set_error", error=e)
+                    # else: error status already set by _geocode
+
+                if self._pending_weather_refresh:
+                    self._pending_weather_refresh = False
                     try:
-                        await self._app.setup_weather(lat, lon, display_name)
-                        self._status_msg = t("tui_weather_set", name=display_name, lat=f"{lat:.4f}", lon=f"{lon:.4f}")
+                        ok = await self._app.refresh_weather()
+                        self._status_msg = t("tui_weather_refreshed") if ok else t("tui_weather_refresh_failed")
+                    except Exception as e:
+                        self._status_msg = t("tui_weather_error", error=e)
+
+                elif self._pending_weather:
+                    lat, lon, name = self._pending_weather
+                    self._pending_weather = None
+                    try:
+                        await self._app.setup_weather(lat, lon, name)
+                        self._status_msg = t("tui_weather_set", name=name, lat=lat, lon=lon)
                     except Exception as e:
                         self._status_msg = t("tui_weather_set_error", error=e)
-                # else: error status already set by _geocode
-
-            if self._pending_weather_refresh:
-                self._pending_weather_refresh = False
-                try:
-                    ok = await self._app.refresh_weather()
-                    self._status_msg = t("tui_weather_refreshed") if ok else t("tui_weather_refresh_failed")
-                except Exception as e:
-                    self._status_msg = t("tui_weather_error", error=e)
-
-            elif self._pending_weather:
-                lat, lon, name = self._pending_weather
-                self._pending_weather = None
-                try:
-                    await self._app.setup_weather(lat, lon, name)
-                    self._status_msg = t("tui_weather_set", name=name, lat=lat, lon=lon)
-                except Exception as e:
-                    self._status_msg = t("tui_weather_set_error", error=e)
+        finally:
+            self._restore_terminal()
 
     # ── Command handling ──────────────────────────────────────────────
 
@@ -591,6 +691,10 @@ class TuiDashboard:
 
         if self._status_msg:
             lines.append(f"  {YELLOW}{self._status_msg}{RESET}")
+
+        if self._input_mode:
+            lines.append(f"  > {self._input_buffer}█")
+            return
 
         if self._view == "dashboard":
             cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph")]
