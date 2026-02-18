@@ -177,6 +177,12 @@ class ConsoleReporter:
             for site_name, site_data in self._remote.get_all_site_data().items():
                 self._print_remote_site(site_name, site_data)
 
+    def _is_peer_site(self, site_name: str) -> bool:
+        """Check if a remote site is a bidirectional peer."""
+        if not self._remote:
+            return False
+        return self._remote.is_peer(site_name) or self._remote.is_incoming_peer(site_name)
+
     def _print_remote_site(self, site_name: str, site_data: object) -> None:
         """Print a remote site's sensor readings."""
         now = datetime.now()
@@ -239,7 +245,7 @@ class ConsoleReporter:
 
         output = [
             "",
-            f"[{site_data.site_name}] {len(rows)} sensors{fetch_info}",
+            f"[{'⇄' if self._is_peer_site(site_name) else '→'} {site_data.site_name}] {len(rows)} sensors{fetch_info}",
             separator,
             header,
             separator,

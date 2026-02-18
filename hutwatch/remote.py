@@ -135,6 +135,15 @@ class RemotePoller:
         """Return snapshot of all remote site data."""
         return dict(self._data)
 
+    def is_peer(self, site_name: str) -> bool:
+        """Check if a site is a bidirectional peer (vs read-only remote)."""
+        return any(p.name == site_name for p in self._peers)
+
+    def is_incoming_peer(self, site_name: str) -> bool:
+        """Check if a site was received via incoming sync (not configured locally)."""
+        configured = {s.name for s in self._remote_sites + self._peers}
+        return site_name in self._data and site_name not in configured
+
     def receive_peer_data(self, site_name: str, data: dict) -> None:
         """Receive and store data from an incoming peer sync request.
 

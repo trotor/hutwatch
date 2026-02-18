@@ -933,7 +933,13 @@ class TuiDashboard:
         else:
             fetch_str = ""
 
-        result.append(f"{BOLD}{site_data.site_name}{RESET}{fetch_str}")
+        # Show sync direction: ⇄ for bidirectional peer, → for read-only remote
+        if self._remote and (self._remote.is_peer(site_name) or self._remote.is_incoming_peer(site_name)):
+            direction = f"{GREEN}⇄{RESET} "
+        else:
+            direction = f"{DIM}→{RESET} "
+
+        result.append(f"{direction}{BOLD}{site_data.site_name}{RESET}{fetch_str}")
 
         if not site_data.online and not site_data.sensors:
             result.append(f"{RED}{t('remote_offline')}{RESET}")
