@@ -89,6 +89,19 @@ def load_config(config_path: Path) -> AppConfig:
         except (KeyError, ValueError) as e:
             logger.warning("Invalid remote site configuration: %s - %s", site_data, e)
 
+    peers = []
+    for peer_data in data.get("peers", []):
+        try:
+            peer = RemoteSiteConfig(
+                name=peer_data["name"],
+                url=peer_data["url"].rstrip("/"),
+                poll_interval=int(peer_data.get("poll_interval", 30)),
+            )
+            peers.append(peer)
+            logger.debug("Loaded peer: %s (%s)", peer.name, peer.url)
+        except (KeyError, ValueError) as e:
+            logger.warning("Invalid peer configuration: %s - %s", peer_data, e)
+
     config = AppConfig(
         sensors=sensors,
         telegram=telegram_config,
@@ -96,6 +109,7 @@ def load_config(config_path: Path) -> AppConfig:
         language=language,
         api_port=api_port,
         remote_sites=remote_sites,
+        peers=peers,
     )
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config

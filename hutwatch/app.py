@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from .aggregator import Aggregator
-from .api import ApiServer
+from .api import ApiServer, build_status_payload
 from .ble.scanner import BleScanner
 from .ble.sensor_store import SensorStore
 from .config import load_config
@@ -116,10 +116,24 @@ class HutWatchApp:
             self._api = ApiServer(self._config, self._store, self._db, self._weather, api_port)
             await self._api.start()
 
-        # Start remote poller if configured
-        if self._config.remote_sites:
-            self._remote = RemotePoller(self._config.remote_sites, db=self._db)
+        # Start remote poller if remote_sites, peers, or api_port configured
+        # (api_port alone enables receiving incoming peer sync requests)
+        needs_remote = bool(self._config.remote_sites) or bool(self._config.peers) or bool(api_port)
+        if needs_remote:
+            def _build_local_status() -> dict:
+                return build_status_payload(self._config, self._store, self._db, self._weather)
+
+            self._remote = RemotePoller(
+                remote_sites=self._config.remote_sites,
+                peers=self._config.peers,
+                db=self._db,
+                local_status_fn=_build_local_status,
+            )
             await self._remote.start()
+
+            # Connect API server to remote poller for incoming sync
+            if self._api:
+                self._api.set_remote_poller(self._remote)
 
         # Determine local mode (--console or --tui skip Telegram)
         _local_mode = self._use_tui or self._console_interval is not None

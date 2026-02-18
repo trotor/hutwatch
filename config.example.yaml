@@ -37,8 +37,16 @@ sensors: []
 # Exposes sensor data as JSON on the given port.
 # api_port: 8099
 
-# Remote HutWatch instances to monitor (optional)
-# Fetches sensor/weather data from other HutWatch API servers.
+# Bidirectional peer sync (optional, recommended)
+# Sends your data to the peer and receives theirs — both sides see everything.
+# The peer only needs api_port enabled, no peers: config needed on that end.
+# peers:
+#   - name: "Cabin"
+#     url: "http://100.64.0.2:8099"
+#     poll_interval: 30
+
+# Read-only remote sites (optional, legacy)
+# One-way monitoring: fetches data but doesn't share yours.
 # remote_sites:
 #   - name: "Cabin"
 #     url: "http://100.64.0.2:8099"

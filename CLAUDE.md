@@ -71,8 +71,8 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
     │   │   └── ReportScheduler (telegram/scheduler.py) - Periodic reports
     │   ├── TuiDashboard (tui.py) - Interactive ASCII terminal dashboard
     │   └── ConsoleReporter (console.py) - Simple periodic/keypress output
-    ├── ApiServer (api.py) - aiohttp REST API for remote site sharing
-    ├── RemotePoller (remote.py) - Polls remote HutWatch instances
+    ├── ApiServer (api.py) - aiohttp REST API + peer sync endpoint
+    ├── RemotePoller (remote.py) - Polls remote sites / syncs with peers
     ├── WeatherFetcher (weather.py) - MET Norway API client (1h updates + on-demand)
     └── Database (db.py) - SQLite: readings, devices, weather, settings tables
 ```
@@ -89,10 +89,16 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
 2. Aggregator (every 5 min) → calculates min/max/avg → SQLite (90-day retention)
 3. UI commands query both SensorStore (recent) and Database (historical)
 
-**Remote Site Flow** (optional):
+**Peer Sync Flow** (recommended for multi-site):
+1. **Connector** (has `peers:` config) sends own data via `POST /api/v1/sync` to peer
+2. **Listener** (has only `api_port`) receives connector's data, returns own data
+3. Both sides see each other's sensors and weather — only one side needs configuration
+4. Falls back to read-only `GET /api/v1/status` if peer runs an older version
+
+**Remote Site Flow** (legacy, read-only):
 1. Local instance runs ApiServer on `api_port` → exposes JSON API
-2. Remote instance runs RemotePoller → fetches data from API, caches to SQLite `settings` table
-3. UI displays remote site data alongside local sensors
+2. Remote instance runs RemotePoller → fetches data via GET, caches to SQLite `settings` table
+3. One-way: remote sees local, but local doesn't see remote
 
 **UI Mode Selection** (mutually exclusive):
 - `--demo` → TuiDashboard with fake data (no config/BLE/network needed, in-memory SQLite)
@@ -198,8 +204,9 @@ Async operations from sync command handlers use "pending action" pattern (flags 
 - `sensors`: List of MAC addresses with names and types (ruuvi/xiaomi). Discovery is always on — new sensors are found automatically even when some are pre-configured. Empty list `[]` uses pure auto-discovery.
 - `telegram`: Bot token, chat_id, report_interval (optional — requires `pip install hutwatch[telegram]`)
 - `weather`: Coordinates (latitude/longitude) and location_name (optional — can also be set from TUI, persisted to DB)
-- `api_port`: Port for the REST API server (optional — enables remote site sharing, e.g., `8099`)
-- `remote_sites`: List of remote HutWatch instances to poll (optional — each with `name`, `url`, `poll_interval`)
+- `api_port`: Port for the REST API server (optional — enables peer sync and remote sharing, e.g., `8099`)
+- `peers`: Bidirectional peer sync (recommended — each with `name`, `url`, `poll_interval`). Only the connector side needs this; the listener only needs `api_port`.
+- `remote_sites`: Legacy read-only remote monitoring (each with `name`, `url`, `poll_interval`)
 
 Without Telegram, use `--tui` for interactive dashboard or `--console` for simple output.
 

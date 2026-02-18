@@ -98,6 +98,7 @@ class AppConfig:
     language: str = "fi"
     api_port: Optional[int] = None
     remote_sites: list[RemoteSiteConfig] = field(default_factory=list)
+    peers: list[RemoteSiteConfig] = field(default_factory=list)
 
     def get_sensor_by_mac(self, mac: str) -> Optional[SensorConfig]:
         """Get sensor config by MAC address."""
