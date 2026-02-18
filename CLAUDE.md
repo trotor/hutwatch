@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Tasks are managed through **GitHub issues**. When planning new features or fixes:
+1. Create a GitHub issue with description and acceptance criteria (`/issue` skill or `gh issue create`)
+2. Reference the issue number in commits (`Fixes #N`)
+3. Close the issue when the work is complete (`gh issue close N`)
+
+Use `/lint` skill to run all static checks before committing.
+
 ## Project Overview
 
 HutWatch is a BLE (Bluetooth Low Energy) temperature monitoring system with three UI modes: Telegram bot, TUI dashboard, and console output. It reads temperature/humidity data from RuuviTag and Xiaomi LYWSD03MMC sensors, fetches weather from MET Norway API (yr.no), and stores data in SQLite.
@@ -62,14 +71,28 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
     │   │   └── ReportScheduler (telegram/scheduler.py) - Periodic reports
     │   ├── TuiDashboard (tui.py) - Interactive ASCII terminal dashboard
     │   └── ConsoleReporter (console.py) - Simple periodic/keypress output
+    ├── ApiServer (api.py) - aiohttp REST API for remote site sharing
+    ├── RemotePoller (remote.py) - Polls remote HutWatch instances
     ├── WeatherFetcher (weather.py) - MET Norway API client (1h updates + on-demand)
     └── Database (db.py) - SQLite: readings, devices, weather, settings tables
 ```
+
+### Supporting Modules
+
+- **formatting.py** — Shared utility functions used by all UI modules: `format_age()`, `format_age_long()`, `format_uptime()`, `parse_time_arg()`, `resolve_device()`, `create_ascii_graph()`, `compute_cutoff()`. Always add shared formatting/parsing logic here instead of duplicating across UI modules.
+- **models.py** — Dataclasses (`SensorReading`, `DeviceInfo`, `AppConfig`, `WeatherData`, etc.) and enums (`SensorType`). Pure data layer with no internal imports.
+- **demo.py** — Generates fake sensor/weather data for `--demo` mode. Uses in-memory SQLite.
+- **widget_output.py** — Standalone JSON output for desktop widgets (Übersicht, SwiftBar). Reads directly from SQLite: `python3 -m hutwatch.widget_output -d /path/to/hutwatch.db`
 
 **Data Flow**:
 1. BLE Scanner detects advertisements → Parsers extract data → SensorStore (24h cache)
 2. Aggregator (every 5 min) → calculates min/max/avg → SQLite (90-day retention)
 3. UI commands query both SensorStore (recent) and Database (historical)
+
+**Remote Site Flow** (optional):
+1. Local instance runs ApiServer on `api_port` → exposes JSON API
+2. Remote instance runs RemotePoller → fetches data from API, caches to SQLite `settings` table
+3. UI displays remote site data alongside local sensors
 
 **UI Mode Selection** (mutually exclusive):
 - `--demo` → TuiDashboard with fake data (no config/BLE/network needed, in-memory SQLite)
@@ -85,6 +108,7 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle
 - **Watchdog timeouts**: 2 min overall, 5 min per-sensor for BLE
 - **Thread-safe cache**: SensorStore uses locks (BLE callback thread + aggregator)
 - **Graceful shutdown**: Signal handlers (SIGINT/SIGTERM) coordinate shutdown
+- **Shared formatting**: All UI modules use `formatting.py` for common logic (age formatting, device resolution, graphs, time parsing)
 
 ## Internationalization (i18n)
 
@@ -92,7 +116,7 @@ All user-facing strings are translated via a dictionary-based `t(key, **kwargs)`
 
 **Files:**
 - `hutwatch/i18n.py` — `t()`, `init_lang()`, `wind_direction_text()` helpers
-- `hutwatch/strings_fi.py` — Finnish strings (~175 keys)
+- `hutwatch/strings_fi.py` — Finnish strings (~180 keys)
 - `hutwatch/strings_en.py` — English strings (same keys)
 
 **Key naming:** `category_description` in snake_case:
@@ -103,6 +127,7 @@ All user-facing strings are translated via a dictionary-based `t(key, **kwargs)`
 - `tui_` — TUI dashboard
 - `console_` — console output
 - `scheduler_` — scheduled reports
+- `remote_` — remote site labels (offline, fetched ago, cached)
 
 **String value types:**
 1. Plain string: `"tg_help_title": "📋 *Help*"`
@@ -128,7 +153,7 @@ Four tables:
 - `readings`: 5-min aggregated sensor data (90-day retention, auto-cleanup)
 - `devices`: Device metadata with user-defined aliases and display ordering
 - `weather`: Historical weather observations from yr.no
-- `settings`: Key-value store for runtime config (site name, weather location)
+- `settings`: Key-value store for runtime config (site name, weather location, remote cache)
 
 ## Telegram Commands
 
@@ -173,6 +198,8 @@ Async operations from sync command handlers use "pending action" pattern (flags 
 - `sensors`: List of MAC addresses with names and types (ruuvi/xiaomi). Discovery is always on — new sensors are found automatically even when some are pre-configured. Empty list `[]` uses pure auto-discovery.
 - `telegram`: Bot token, chat_id, report_interval (optional — requires `pip install hutwatch[telegram]`)
 - `weather`: Coordinates (latitude/longitude) and location_name (optional — can also be set from TUI, persisted to DB)
+- `api_port`: Port for the REST API server (optional — enables remote site sharing, e.g., `8099`)
+- `remote_sites`: List of remote HutWatch instances to poll (optional — each with `name`, `url`, `poll_interval`)
 
 Without Telegram, use `--tui` for interactive dashboard or `--console` for simple output.
 
