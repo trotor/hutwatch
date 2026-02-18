@@ -23,6 +23,78 @@
           "command": "python scripts/check_i18n.py"
         }
       ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Edit",
+        "filePath": "hutwatch/__init__.py"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_version_sync.py"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Edit",
+        "filePath": "pyproject.toml"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_version_sync.py"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Write",
+        "filePath": "hutwatch/__init__.py"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_version_sync.py"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Write",
+        "filePath": "pyproject.toml"
+      },
+      "hooks": [
+        {
+          "command": "python scripts/check_version_sync.py"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Edit",
+        "filePath": "hutwatch/**.py"
+      },
+      "hooks": [
+        {
+          "command": "python -m py_compile $(echo $CLAUDE_FILE_PATHS | tr ':' ' ')"
+        }
+      ]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": {
+        "toolName": "Write",
+        "filePath": "hutwatch/**.py"
+      },
+      "hooks": [
+        {
+          "command": "python -m py_compile $(echo $CLAUDE_FILE_PATHS | tr ':' ' ')"
+        }
+      ]
     }
   ]
 }
