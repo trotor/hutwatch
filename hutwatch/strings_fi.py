@@ -290,6 +290,7 @@ STRINGS: dict = {
     "remote_fetched_ago": "haettu {age} sitten",
     "remote_last_seen": "viimeksi nähty {age} sitten",
     "remote_cached": "välimuistissa",
+    "remote_peers_status": lambda online, total, **_: f"⇄ {online}/{total}" if total > 0 else "",
 
     # ── Console ───────────────────────────────────────────────────────
     "console_no_data_yet": "Ei anturidataa vielä...",

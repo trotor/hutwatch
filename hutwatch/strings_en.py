@@ -292,6 +292,7 @@ STRINGS: dict = {
     "remote_fetched_ago": "fetched {age} ago",
     "remote_last_seen": "last seen {age} ago",
     "remote_cached": "cached",
+    "remote_peers_status": lambda online, total, **_: f"⇄ {online}/{total}" if total > 0 else "",
 
     # ── Console ───────────────────────────────────────────────────────
     "console_no_data_yet": "No sensor data yet...",

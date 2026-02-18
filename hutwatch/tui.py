@@ -638,10 +638,24 @@ class TuiDashboard:
             "graph": f" / {t('tui_view_graph')} ({self._time_str()})",
         }.get(self._view, "")
 
+        # Peer sync indicator
+        peer_indicator = ""
+        peer_indicator_visible = ""
+        if self._remote:
+            all_sites = self._remote.get_all_site_data()
+            if all_sites:
+                online = sum(1 for s in all_sites.values() if s.online)
+                total = len(all_sites)
+                status_text = t("remote_peers_status", online=online, total=total)
+                if status_text:
+                    color = GREEN if online == total else (YELLOW if online > 0 else RED)
+                    peer_indicator = f" {color}{status_text}{RESET}"
+                    peer_indicator_visible = f" {status_text}"
+
         timestamp = now.strftime("%d.%m. %H:%M:%S")
-        left = f"{BOLD}{title}{RESET}{DIM}{view_label}{RESET}"
+        left = f"{BOLD}{title}{RESET}{peer_indicator}{DIM}{view_label}{RESET}"
         # Calculate visible length (without ANSI codes)
-        left_visible = len(title) + len(view_label)
+        left_visible = len(title) + len(peer_indicator_visible) + len(view_label)
         padding = cols - left_visible - len(timestamp)
         lines.append(f"{left}{' ' * max(padding, 2)}{DIM}{timestamp}{RESET}")
         lines.append("=" * cols)
