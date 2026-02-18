@@ -320,7 +320,7 @@ class Database:
                 (alias, mac.upper()),
             )
             self._conn.commit()
-            return self._conn.total_changes > 0
+            return cursor.rowcount > 0
         except Exception as e:
             logger.error("Error setting device alias: %s", e)
             return False

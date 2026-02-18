@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import signal
 import shutil
 import sys
 from datetime import datetime
@@ -274,7 +275,6 @@ class TuiDashboard:
 
                 if quit_requested:
                     self._running = False
-                    import signal
                     os.kill(os.getpid(), signal.SIGINT)
                     return
 
@@ -303,7 +303,7 @@ class TuiDashboard:
                     except Exception as e:
                         self._status_msg = t("tui_weather_error", error=e)
 
-                elif self._pending_weather:
+                if self._pending_weather:
                     lat, lon, name = self._pending_weather
                     self._pending_weather = None
                     try:
@@ -509,13 +509,13 @@ class TuiDashboard:
         import aiohttp
 
         url = "https://nominatim.openstreetmap.org/search"
+        from . import __version__
         params = {
             "q": query,
             "format": "json",
             "limit": "1",
-            "countrycodes": "fi",
         }
-        headers = {"User-Agent": "HutWatch/0.1.0"}
+        headers = {"User-Agent": f"HutWatch/{__version__}"}
 
         try:
             async with aiohttp.ClientSession() as session:

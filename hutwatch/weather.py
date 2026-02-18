@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 API_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
 
 # User-Agent is required by MET Norway API
-USER_AGENT = "HutWatch/0.1.0 github.com/hutwatch"
+def _get_user_agent() -> str:
+    from . import __version__
+    return f"HutWatch/{__version__} github.com/hutwatch"
 
 # Weather symbol code to emoji mapping
 WEATHER_SYMBOLS = {
@@ -87,7 +89,7 @@ class WeatherFetcher:
         """Initialize the HTTP session."""
         if self._session is None:
             self._session = aiohttp.ClientSession(
-                headers={"User-Agent": USER_AGENT}
+                headers={"User-Agent": _get_user_agent()}
             )
 
     async def stop(self) -> None:
