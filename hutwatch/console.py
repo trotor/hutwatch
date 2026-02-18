@@ -10,6 +10,7 @@ from typing import Optional
 
 from .ble.sensor_store import SensorStore
 from .db import Database
+from .formatting import format_age_long
 from .i18n import t
 from .models import AppConfig
 
@@ -141,10 +142,7 @@ class ConsoleReporter:
                 battery = "-"
 
             age = (now - reading.timestamp).total_seconds()
-            if age < 60:
-                age_str = t("time_ago_seconds", n=int(age))
-            else:
-                age_str = t("time_ago_minutes", n=int(age / 60))
+            age_str = format_age_long(age)
 
             rows.append((name, temp, humidity, battery, age_str))
 
@@ -187,12 +185,7 @@ class ConsoleReporter:
             if site_data.sensors and site_data.last_fetch:
                 # Show cached data with last seen age
                 last_seen_age = (now - site_data.last_fetch).total_seconds()
-                if last_seen_age < 60:
-                    age_str = t("time_ago_seconds", n=int(last_seen_age))
-                elif last_seen_age < 3600:
-                    age_str = t("time_ago_minutes", n=int(last_seen_age / 60))
-                else:
-                    age_str = t("time_ago_hours", n=int(last_seen_age / 3600))
+                age_str = format_age_long(last_seen_age)
                 print(f"\n  [{site_data.site_name}] {t('remote_offline')} - {t('remote_last_seen', age=age_str)}")
             else:
                 print(f"\n  [{site_data.site_name}] {t('remote_offline')}")
@@ -220,10 +213,7 @@ class ConsoleReporter:
             effective_age = s.age_seconds or 0
             if site_data.last_fetch:
                 effective_age += (now - site_data.last_fetch).total_seconds()
-            if effective_age < 60:
-                age_str = t("time_ago_seconds", n=int(effective_age))
-            else:
-                age_str = t("time_ago_minutes", n=int(effective_age / 60))
+            age_str = format_age_long(effective_age)
 
             rows.append((s.name, temp, humidity, battery, age_str))
 

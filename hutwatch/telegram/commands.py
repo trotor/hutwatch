@@ -11,6 +11,13 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..ble.sensor_store import SensorStore
+from ..formatting import (
+    create_ascii_graph,
+    format_age_long,
+    format_uptime,
+    parse_time_arg,
+    resolve_device,
+)
 from ..i18n import t, wind_direction_text
 from ..models import AppConfig, DeviceInfo
 
@@ -56,42 +63,10 @@ class CommandHandlers:
         return devices
 
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
-        """Resolve device by order number, alias, config name, or MAC.
-
-        Returns DeviceInfo with config_name populated if found.
-        """
+        """Resolve device by order number, alias, config name, or MAC."""
         if not self._db:
             return None
-
-        # Try as order number first
-        if identifier.isdigit():
-            device = self._db.get_device_by_order(int(identifier))
-            if device:
-                sensor_config = self._config.get_sensor_by_mac(device.mac)
-                if sensor_config:
-                    device.config_name = sensor_config.name
-                return device
-
-        # Get all devices to search
-        devices = self._get_devices_with_config_names()
-
-        # Search by alias (case-insensitive)
-        for device in devices:
-            if device.alias and device.alias.lower() == identifier.lower():
-                return device
-
-        # Search by config name (case-insensitive)
-        for device in devices:
-            if device.config_name and device.config_name.lower() == identifier.lower():
-                return device
-
-        # Search by MAC address (case-insensitive)
-        identifier_upper = identifier.upper()
-        for device in devices:
-            if device.mac == identifier_upper:
-                return device
-
-        return None
+        return resolve_device(identifier, self._db, self._config)
 
     @property
     def reports_enabled(self) -> bool:
@@ -384,16 +359,7 @@ class CommandHandlers:
 
     def _parse_time_arg(self, arg: str) -> tuple[Optional[int], Optional[int]]:
         """Parse time argument like '6', '24h', '7d'. Returns (hours, days)."""
-        match = re.match(r"^(\d+)(h|d)?$", arg.lower())
-        if not match:
-            return None, None
-
-        value = int(match.group(1))
-        unit = match.group(2) or "h"
-
-        if unit == "d":
-            return None, value
-        return value, None
+        return parse_time_arg(arg)
 
     async def history(
         self,
@@ -837,74 +803,8 @@ class CommandHandlers:
         width: int = 24,
         height: int = 8,
     ) -> tuple[str, str]:
-        """Create ASCII art graph from data points.
-
-        Returns tuple of (graph_string, timeline_string).
-        """
-        if not data:
-            return t("common_no_data"), ""
-
-        timestamps = [ts for ts, _ in data]
-        temps = [tmp for _, tmp in data]
-        min_temp = min(temps)
-        max_temp = max(temps)
-        temp_range = max_temp - min_temp
-
-        if temp_range == 0:
-            temp_range = 1
-
-        # Sample data to fit width
-        step = max(1, len(data) // width)
-        sampled = [temps[i] for i in range(0, len(data), step)][:width]
-        sampled_times = [timestamps[i] for i in range(0, len(data), step)][:width]
-        actual_width = len(sampled)
-
-        # Build graph
-        lines = []
-        for row in range(height):
-            threshold = max_temp - (row / (height - 1)) * temp_range
-            line = ""
-            for temp in sampled:
-                if temp >= threshold:
-                    line += "█"
-                else:
-                    line += " "
-            # Add temperature label on first and last row
-            if row == 0:
-                lines.append(f"{max_temp:5.1f}°│{line}│")
-            elif row == height - 1:
-                lines.append(f"{min_temp:5.1f}°│{line}│")
-            else:
-                lines.append(f"      │{line}│")
-
-        # Build timeline
-        if sampled_times:
-            first_time = sampled_times[0]
-            last_time = sampled_times[-1]
-            total_hours = (last_time - first_time).total_seconds() / 3600
-
-            if total_hours <= 24:
-                # Show hours
-                first_label = first_time.strftime("%H:%M")
-                last_label = last_time.strftime("%H:%M")
-            elif total_hours <= 168:
-                # Show dates for multi-day
-                first_label = first_time.strftime("%d.%m")
-                last_label = last_time.strftime("%d.%m")
-            else:
-                first_label = first_time.strftime("%d.%m")
-                last_label = last_time.strftime("%d.%m")
-
-            # Create timeline with labels at start and end
-            padding = actual_width - len(first_label) - len(last_label)
-            if padding > 0:
-                timeline = f"      └{first_label}{' ' * padding}{last_label}┘"
-            else:
-                timeline = f"      └{first_label}{'─' * (actual_width - len(first_label))}┘"
-        else:
-            timeline = ""
-
-        return "\n".join(lines), timeline
+        """Create ASCII art graph from data points."""
+        return create_ascii_graph(data, width, height)
 
     async def weather(
         self,
@@ -1362,27 +1262,8 @@ class CommandHandlers:
 
     def _format_age(self, age: timedelta) -> str:
         """Format timedelta as human-readable string."""
-        total_seconds = int(age.total_seconds())
-
-        if total_seconds < 60:
-            return t("time_ago_seconds", n=total_seconds)
-        elif total_seconds < 3600:
-            minutes = total_seconds // 60
-            return t("time_ago_minutes", n=minutes)
-        else:
-            hours = total_seconds // 3600
-            return t("time_ago_hours", n=hours)
+        return format_age_long(age.total_seconds())
 
     def _format_uptime(self, uptime: timedelta) -> str:
         """Format uptime as human-readable string."""
-        total_seconds = int(uptime.total_seconds())
-        days = total_seconds // 86400
-        hours = (total_seconds % 86400) // 3600
-        minutes = (total_seconds % 3600) // 60
-
-        if days > 0:
-            return t("time_uptime_dhm", d=days, h=hours, m=minutes)
-        elif hours > 0:
-            return t("time_uptime_hm", h=hours, m=minutes)
-        else:
-            return t("time_uptime_m", m=minutes)
+        return format_uptime(uptime)

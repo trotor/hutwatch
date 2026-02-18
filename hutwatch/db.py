@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from .models import SensorConfig
 
+from .formatting import compute_cutoff
 from .models import DeviceInfo
 
 logger = logging.getLogger(__name__)
@@ -180,12 +181,7 @@ class Database:
         if not self._conn:
             return []
 
-        if days:
-            cutoff = datetime.now() - timedelta(days=days)
-        elif hours:
-            cutoff = datetime.now() - timedelta(hours=hours)
-        else:
-            cutoff = datetime.now() - timedelta(hours=24)
+        cutoff = compute_cutoff(hours, days)
 
         cursor = self._conn.execute(
             """
@@ -209,12 +205,7 @@ class Database:
         if not self._conn:
             return None
 
-        if days:
-            cutoff = datetime.now() - timedelta(days=days)
-        elif hours:
-            cutoff = datetime.now() - timedelta(hours=hours)
-        else:
-            cutoff = datetime.now() - timedelta(hours=24)
+        cutoff = compute_cutoff(hours, days)
 
         cursor = self._conn.execute(
             """
@@ -246,7 +237,7 @@ class Database:
         if not self._conn:
             return []
 
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = compute_cutoff(hours)
 
         cursor = self._conn.execute(
             """
@@ -268,7 +259,7 @@ class Database:
         if not self._conn:
             return 0
 
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = compute_cutoff(days=days)
         cursor = self._conn.execute(
             "DELETE FROM readings WHERE timestamp < ?",
             (cutoff.strftime("%Y-%m-%d %H:%M:%S"),),
@@ -457,12 +448,7 @@ class Database:
         if not self._conn:
             return []
 
-        if days:
-            cutoff = datetime.now() - timedelta(days=days)
-        elif hours:
-            cutoff = datetime.now() - timedelta(hours=hours)
-        else:
-            cutoff = datetime.now() - timedelta(hours=24)
+        cutoff = compute_cutoff(hours, days)
 
         cursor = self._conn.execute(
             """
@@ -486,12 +472,7 @@ class Database:
         if not self._conn:
             return None
 
-        if days:
-            cutoff = datetime.now() - timedelta(days=days)
-        elif hours:
-            cutoff = datetime.now() - timedelta(hours=hours)
-        else:
-            cutoff = datetime.now() - timedelta(hours=24)
+        cutoff = compute_cutoff(hours, days)
 
         cursor = self._conn.execute(
             """
@@ -545,7 +526,7 @@ class Database:
         if not self._conn:
             return []
 
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = compute_cutoff(hours)
 
         cursor = self._conn.execute(
             """
