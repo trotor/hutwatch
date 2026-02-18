@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -61,17 +62,69 @@ class RemoteSiteData:
 class RemotePoller:
     """Polls remote HutWatch instances for sensor/weather data."""
 
-    def __init__(self, sites: list[RemoteSiteConfig]) -> None:
+    def __init__(self, sites: list[RemoteSiteConfig], db=None) -> None:
         self._sites = sites
+        self._db = db
         self._data: dict[str, RemoteSiteData] = {
             site.name: RemoteSiteData(site_name=site.name) for site in sites
         }
         self._session: Optional[aiohttp.ClientSession] = None
         self._tasks: list[asyncio.Task] = []
 
+        # Load cached data from database on startup
+        for site in sites:
+            self._load_cache_from_db(site.name)
+
     def get_all_site_data(self) -> dict[str, RemoteSiteData]:
         """Return snapshot of all remote site data."""
         return dict(self._data)
+
+    def _load_cache_from_db(self, site_name: str) -> None:
+        """Load cached remote site data from database settings table."""
+        if not self._db:
+            return
+        raw = self._db.get_setting(f"remote_cache_{site_name}")
+        if not raw:
+            return
+        try:
+            cached = json.loads(raw)
+            sensors = [
+                RemoteSensor(**s) for s in cached.get("sensors", [])
+            ]
+            weather = None
+            if cached.get("weather"):
+                weather = RemoteWeather(**cached["weather"])
+            last_fetch = None
+            if cached.get("last_fetch"):
+                last_fetch = datetime.fromisoformat(cached["last_fetch"])
+            self._data[site_name] = RemoteSiteData(
+                site_name=cached.get("site_name", site_name),
+                sensors=sensors,
+                weather=weather,
+                last_fetch=last_fetch,
+                online=False,
+            )
+            logger.info("Loaded cached data for remote site %s", site_name)
+        except Exception as e:
+            logger.warning("Failed to load cache for remote site %s: %s", site_name, e)
+
+    def _save_cache_to_db(self, site_name: str) -> None:
+        """Save remote site data to database settings table."""
+        if not self._db:
+            return
+        site_data = self._data.get(site_name)
+        if not site_data:
+            return
+        try:
+            cache = {
+                "site_name": site_data.site_name,
+                "sensors": [asdict(s) for s in site_data.sensors],
+                "weather": asdict(site_data.weather) if site_data.weather else None,
+                "last_fetch": site_data.last_fetch.isoformat() if site_data.last_fetch else None,
+            }
+            self._db.set_setting(f"remote_cache_{site_name}", json.dumps(cache))
+        except Exception as e:
+            logger.warning("Failed to save cache for remote site %s: %s", site_name, e)
 
     async def start(self) -> None:
         """Start polling all remote sites."""
@@ -158,6 +211,7 @@ class RemotePoller:
                 last_fetch=datetime.now(),
                 online=True,
             )
+            self._save_cache_to_db(site.name)
             logger.debug("Fetched remote site %s: %d sensors", site.name, len(sensors))
 
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:

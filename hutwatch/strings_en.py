@@ -290,6 +290,8 @@ STRINGS: dict = {
     # ── Remote sites ─────────────────────────────────────────────────
     "remote_offline": "offline",
     "remote_fetched_ago": "fetched {age} ago",
+    "remote_last_seen": "last seen {age} ago",
+    "remote_cached": "cached",
 
     # ── Console ───────────────────────────────────────────────────────
     "console_no_data_yet": "No sensor data yet...",

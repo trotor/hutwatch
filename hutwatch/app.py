@@ -118,7 +118,7 @@ class HutWatchApp:
 
         # Start remote poller if configured
         if self._config.remote_sites:
-            self._remote = RemotePoller(self._config.remote_sites)
+            self._remote = RemotePoller(self._config.remote_sites, db=self._db)
             await self._remote.start()
 
         # Determine local mode (--console or --tui skip Telegram)

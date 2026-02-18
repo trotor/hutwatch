@@ -184,8 +184,19 @@ class ConsoleReporter:
         now = datetime.now()
 
         if not site_data.online:
-            print(f"\n  [{site_data.site_name}] {t('remote_offline')}")
-            return
+            if site_data.sensors and site_data.last_fetch:
+                # Show cached data with last seen age
+                last_seen_age = (now - site_data.last_fetch).total_seconds()
+                if last_seen_age < 60:
+                    age_str = t("time_ago_seconds", n=int(last_seen_age))
+                elif last_seen_age < 3600:
+                    age_str = t("time_ago_minutes", n=int(last_seen_age / 60))
+                else:
+                    age_str = t("time_ago_hours", n=int(last_seen_age / 3600))
+                print(f"\n  [{site_data.site_name}] {t('remote_offline')} - {t('remote_last_seen', age=age_str)}")
+            else:
+                print(f"\n  [{site_data.site_name}] {t('remote_offline')}")
+                return
 
         if not site_data.sensors:
             return

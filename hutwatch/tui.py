@@ -947,16 +947,19 @@ class TuiDashboard:
         result: list[str] = []
         result.append("")
 
-        # Site header with fetch age
+        # Site header with fetch age or last seen age
         if site_data.online and site_data.last_fetch:
             fetch_age = (now - site_data.last_fetch).total_seconds()
             fetch_str = f" {DIM}({t('remote_fetched_ago', age=_format_age(fetch_age))}){RESET}"
+        elif not site_data.online and site_data.last_fetch and site_data.sensors:
+            last_seen_age = (now - site_data.last_fetch).total_seconds()
+            fetch_str = f" {RED}({t('remote_offline')}){RESET} {DIM}({t('remote_last_seen', age=_format_age(last_seen_age))}){RESET}"
         else:
             fetch_str = ""
 
         result.append(f"{BOLD}{site_data.site_name}{RESET}{fetch_str}")
 
-        if not site_data.online:
+        if not site_data.online and not site_data.sensors:
             result.append(f"{RED}{t('remote_offline')}{RESET}")
             return result
 
@@ -978,7 +981,10 @@ class TuiDashboard:
                 effective_age += (now - site_data.last_fetch).total_seconds()
             age_str = _format_age(effective_age)
 
-            if effective_age < 300:
+            # Force red dot when offline (cached data)
+            if not site_data.online:
+                dot = f"{RED}●{RESET}"
+            elif effective_age < 300:
                 dot = f"{GREEN}●{RESET}"
             elif effective_age < 600:
                 dot = f"{YELLOW}●{RESET}"
@@ -1000,7 +1006,7 @@ class TuiDashboard:
     ) -> list[str]:
         """Render remote site weather lines for wide layout."""
         result: list[str] = []
-        if not site_data.online or not site_data.weather:
+        if not site_data.weather:
             return result
 
         w = site_data.weather
@@ -1008,8 +1014,10 @@ class TuiDashboard:
         emoji = get_weather_emoji(w.symbol_code)
         location = w.location or site_data.site_name
 
+        cached_str = f" {DIM}({t('remote_cached')}){RESET}" if not site_data.online else ""
+
         result.append("")
-        result.append(f"{BOLD}{emoji} {location}{RESET}")
+        result.append(f"{BOLD}{emoji} {location}{RESET}{cached_str}")
 
         label = f"{t('weather_temperature')}:"
         result.append(f"{label:<13}{BOLD}{w.temperature:.1f}°C{RESET}")
