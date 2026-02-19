@@ -23,6 +23,7 @@ from ..models import AppConfig, DeviceInfo
 
 if TYPE_CHECKING:
     from ..db import Database
+    from ..remote import RemotePoller
     from ..weather import WeatherFetcher
 
 logger = logging.getLogger(__name__)
@@ -42,11 +43,13 @@ class CommandHandlers:
         store: SensorStore,
         db: Optional["Database"] = None,
         weather: Optional["WeatherFetcher"] = None,
+        remote: Optional["RemotePoller"] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._weather = weather
+        self._remote = remote
         self._reports_enabled = False
         self._start_time = datetime.now()
 
@@ -67,6 +70,66 @@ class CommandHandlers:
         if not self._db:
             return None
         return resolve_device(identifier, self._db, self._config)
+
+    def _format_remote_temps_lines(self) -> list[str]:
+        """Format remote site sensor data as Telegram Markdown lines."""
+        if not self._remote:
+            return []
+
+        lines: list[str] = []
+        now = datetime.now()
+
+        for site_name, site_data in self._remote.get_all_site_data().items():
+            if not site_data.sensors:
+                if not site_data.online:
+                    lines.append("")
+                    direction = "⇄" if self._is_peer_site(site_name) else "→"
+                    lines.append(f"{direction} *{site_data.site_name}*: _{t('remote_offline')}_")
+                continue
+
+            # Site header with fetch info
+            fetch_str = ""
+            if site_data.last_fetch:
+                fetch_age = (now - site_data.last_fetch).total_seconds()
+                fetch_str = f" _({t('time_fetched_ago', age=format_age_long(fetch_age))})_"
+
+            direction = "⇄" if self._is_peer_site(site_name) else "→"
+            offline_str = f" _{t('remote_offline')}_" if not site_data.online else ""
+
+            lines.append("")
+            lines.append(f"{direction} *{site_data.site_name}*{offline_str}{fetch_str}")
+
+            for s in site_data.sensors:
+                if s.temperature is None:
+                    continue
+
+                line = f"  *{s.name}*: {s.temperature:.1f}°C"
+                if s.humidity is not None:
+                    line += f", {s.humidity:.0f}%"
+
+                # Effective age = sensor age + time since fetch
+                effective_age = s.age_seconds or 0
+                if site_data.last_fetch:
+                    effective_age += (now - site_data.last_fetch).total_seconds()
+                line += f" _{format_age_long(effective_age)}_"
+
+                lines.append(line)
+
+            # Remote weather if available
+            if site_data.weather:
+                w = site_data.weather
+                weather_line = f"  🌤️ *{w.location or site_data.site_name}*: {w.temperature:.1f}°C"
+                if w.humidity is not None:
+                    weather_line += f", {w.humidity:.0f}%"
+                lines.append(weather_line)
+
+        return lines
+
+    def _is_peer_site(self, site_name: str) -> bool:
+        """Check if a remote site is a bidirectional peer."""
+        if not self._remote:
+            return False
+        return self._remote.is_peer(site_name) or self._remote.is_incoming_peer(site_name)
 
     @property
     def reports_enabled(self) -> bool:
@@ -134,6 +197,9 @@ class CommandHandlers:
             emoji = get_weather_emoji(w.symbol_code)
             lines.append("")
             lines.append(f"{emoji} *{self._weather.location_name}*: {w.temperature:.1f}°C")
+
+        # Add remote site data
+        lines.extend(self._format_remote_temps_lines())
 
         await update.effective_message.reply_text(
             "\n".join(lines),
@@ -213,9 +279,22 @@ class CommandHandlers:
 
         lines.append(f"\n{t('tg_status_summary', active=active, total=total)}")
 
+        # Remote site status
+        if self._remote:
+            remote_data = self._remote.get_all_site_data()
+            if remote_data:
+                lines.append("")
+                for site_name, site_data in remote_data.items():
+                    direction = "⇄" if self._is_peer_site(site_name) else "→"
+                    if site_data.online:
+                        n_sensors = len([s for s in site_data.sensors if s.temperature is not None])
+                        lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors")
+                    else:
+                        lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}")
+
         # Report status
         report_status = t("tg_status_report_on") if self._reports_enabled else t("tg_status_report_off")
-        lines.append(f"{t('tg_status_report_label')} {report_status}")
+        lines.append(f"\n{t('tg_status_report_label')} {report_status}")
 
         # Uptime
         uptime = datetime.now() - self._start_time
@@ -1009,6 +1088,9 @@ class CommandHandlers:
             lines.append("")
             lines.append(f"{emoji} *{self._weather.location_name}*: {w.temperature:.1f}°C")
 
+        # Add remote site data
+        lines.extend(self._format_remote_temps_lines())
+
         keyboard = [
             [
                 InlineKeyboardButton(t("tg_menu_btn_refresh"), callback_data="temps"),
@@ -1225,10 +1307,23 @@ class CommandHandlers:
             total = len(devices)
             lines.append(f"\n{t('tg_status_summary', active=active, total=total)}")
 
+            # Remote site status
+            if self._remote:
+                remote_data = self._remote.get_all_site_data()
+                if remote_data:
+                    lines.append("")
+                    for site_name, site_data in remote_data.items():
+                        direction = "⇄" if self._is_peer_site(site_name) else "→"
+                        if site_data.online:
+                            n_sensors = len([s for s in site_data.sensors if s.temperature is not None])
+                            lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors")
+                        else:
+                            lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}")
+
             # Uptime
             uptime = datetime.now() - self._start_time
             uptime_str = self._format_uptime(uptime)
-            lines.append(f"{t('tg_status_uptime_label')} {uptime_str}")
+            lines.append(f"\n{t('tg_status_uptime_label')} {uptime_str}")
 
         keyboard = [
             [

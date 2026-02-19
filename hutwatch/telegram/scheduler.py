@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING, Optional
 from telegram.ext import ContextTypes
 
 from ..ble.sensor_store import SensorStore
+from ..formatting import format_age_long
 from ..i18n import t
 from ..models import AppConfig
 
 if TYPE_CHECKING:
+    from ..remote import RemotePoller
     from ..weather import WeatherFetcher
     from .commands import CommandHandlers
 
@@ -28,11 +30,13 @@ class ReportScheduler:
         store: SensorStore,
         commands: "CommandHandlers",
         weather: Optional["WeatherFetcher"] = None,
+        remote: Optional["RemotePoller"] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._commands = commands
         self._weather = weather
+        self._remote = remote
 
     async def send_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send scheduled temperature report."""
@@ -76,6 +80,27 @@ class ReportScheduler:
             if w.humidity is not None:
                 weather_line += f", {w.humidity:.0f}%"
             lines.append(weather_line)
+
+        # Add remote site data
+        if self._remote:
+            now = datetime.now()
+            for site_name, site_data in self._remote.get_all_site_data().items():
+                if not site_data.sensors:
+                    continue
+
+                is_peer = self._remote.is_peer(site_name) or self._remote.is_incoming_peer(site_name)
+                direction = "⇄" if is_peer else "→"
+                offline_str = f" _{t('remote_offline')}_" if not site_data.online else ""
+                lines.append("")
+                lines.append(f"{direction} *{site_data.site_name}*{offline_str}")
+
+                for s in site_data.sensors:
+                    if s.temperature is None:
+                        continue
+                    line = f"  *{s.name}*: {s.temperature:.1f}°C"
+                    if s.humidity is not None:
+                        line += f", {s.humidity:.0f}%"
+                    lines.append(line)
 
         try:
             await context.bot.send_message(

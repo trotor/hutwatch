@@ -139,7 +139,7 @@ class HutWatchApp:
         _local_mode = self._use_tui or self._console_interval is not None
 
         if not _local_mode and self._config.telegram and _HAS_TELEGRAM:
-            self._bot = TelegramBot(self._config, self._store, self._db, self._weather)
+            self._bot = TelegramBot(self._config, self._store, self._db, self._weather, remote=self._remote)
         elif _local_mode and self._config.telegram:
             logger.info("Local mode active, skipping Telegram bot")
         elif self._config.telegram and not _HAS_TELEGRAM:
