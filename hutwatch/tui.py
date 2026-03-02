@@ -46,9 +46,9 @@ RED = "\033[31m"
 AUTO_REFRESH_SECONDS = 10
 
 # Keys that execute instantly without Enter
-_INSTANT_KEYS = frozenset('qtydr')
+_INSTANT_KEYS = frozenset('qtydrf')
 # Keys that start input mode (may need arguments, confirmed with Enter)
-_INPUT_KEYS = frozenset('hsgnpw')
+_INPUT_KEYS = frozenset('hsgnpwu')
 
 
 def _format_age(seconds: float) -> str:
@@ -71,6 +71,7 @@ class TuiDashboard:
         q          - quit
         t          - toggle status section visibility
         y          - toggle summary mode (inline min-max / expanded)
+        f          - toggle show hidden devices
         d          - devices list
         r          - refresh current view
         Enter      - refresh / back to dashboard
@@ -81,6 +82,8 @@ class TuiDashboard:
         g <n> [period] - graph for sensor n (e.g. g 1, g 1 7d)
         n <n> <name>   - rename device (e.g. n 1 Olohuone)
         n <n> -              - clear device alias
+        hide <n>             - hide device from views
+        unhide <n>           - unhide device
         p <name>             - name this site (e.g. p Mökki)
         p -                  - clear site name
         w <place>            - set weather by place name (geocoding)
@@ -121,6 +124,7 @@ class TuiDashboard:
         self._status_msg: Optional[str] = None  # one-shot feedback message
         self._show_status: bool = True  # toggle with 't' command
         self._show_summary: bool = False  # toggle with 'y': False=inline min-max, True=expanded
+        self._show_hidden: bool = False  # toggle with 'f' command
         self._input_mode = False  # True when building a command line
         self._input_buffer = ""   # Accumulated input in input mode
         self._old_term_settings = None  # Saved terminal settings for cbreak restore
@@ -342,6 +346,11 @@ class TuiDashboard:
             self._status_msg = t("tui_summary_toggle_expanded") if self._show_summary else t("tui_summary_toggle_inline")
             return
 
+        if cmd == "f":
+            self._show_hidden = not self._show_hidden
+            self._status_msg = t("tui_show_hidden_on") if self._show_hidden else t("tui_show_hidden_off")
+            return
+
         if cmd == "h":
             self._view = "history"
             self._view_hours = 6
@@ -384,6 +393,21 @@ class TuiDashboard:
                 self._status_msg = t("tui_weather_refreshing")
             else:
                 self._status_msg = t("tui_weather_not_available")
+            return
+
+        if cmd in ("hide", "unhide"):
+            if len(parts) < 2:
+                self._status_msg = t("tui_hide_not_found", id="?")
+                return
+            identifier = " ".join(parts[1:])
+            device = resolve_device(identifier, self._db, self._config)
+            if not device:
+                self._status_msg = t("tui_hide_not_found", id=identifier)
+                return
+            hide = cmd == "hide"
+            self._db.set_device_hidden(device.mac, hide)
+            name = device.get_display_name()
+            self._status_msg = t("tui_hide_success", name=name) if hide else t("tui_unhide_success", name=name)
             return
 
         self._status_msg = t("tui_unknown_command", cmd=cmd)
@@ -560,7 +584,7 @@ class TuiDashboard:
     ]:
         """Get ordered MAC list, device map, and readings map."""
         readings = self._store.get_all_latest()
-        devices = self._db.get_all_devices()
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
         device_map = {d.mac: d for d in devices}
 
         # Populate config names
@@ -676,6 +700,7 @@ class TuiDashboard:
             cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph")]
             cmds.append(t("tui_cmd_status_toggle"))
             cmds.append(t("tui_cmd_summary_toggle"))
+            cmds.append(t("tui_cmd_show_hidden"))
             cmds.append(t("tui_cmd_rename"))
             cmds.append(t("tui_cmd_site_name"))
             if self._weather:
@@ -1465,7 +1490,7 @@ class TuiDashboard:
 
     def _render_devices(self, lines: list[str], cols: int) -> None:
         """Render device list with MAC, type, alias, and order."""
-        devices = self._db.get_all_devices()
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
 
         lines.append("")
         lines.append(f"{BOLD}  {t('tui_view_devices')}{RESET}")
@@ -1487,12 +1512,14 @@ class TuiDashboard:
                 order = str(d.display_order)
                 sensor_type = d.sensor_type or "-"
 
+                hidden_mark = f" {t('tui_hidden_marker')}" if d.hidden else ""
                 lines.append(
-                    f"  {order:<4}{config_name:<16}{alias:<16}{d.mac:<20}{sensor_type:<8}"
+                    f"  {order:<4}{config_name:<16}{alias:<16}{d.mac:<20}{sensor_type:<8}{hidden_mark}"
                 )
 
         lines.append("")
         lines.append(f"  {DIM}{t('tui_devices_rename_hint')}{RESET}")
+        lines.append(f"  {DIM}{t('tui_devices_hide_hint')}{RESET}")
 
     # ── Graph view ────────────────────────────────────────────────────
 
