@@ -85,6 +85,13 @@ STRINGS: dict = {
     "tg_rename_cleared": "✅ Laite {order} alias poistettu",
     "tg_rename_failed": "Nimeäminen epäonnistui",
 
+    # ── Telegram: hide/unhide ────────────────────────────────────────
+    "tg_hide_success": "✅ Laite *{name}* piilotettu",
+    "tg_unhide_success": "✅ Laite *{name}* näytetään",
+    "tg_hide_not_found": "❌ Laitetta ei löytynyt: {id}",
+    "tg_showhidden_on": "👁 Piilotetut laitteet näytetään",
+    "tg_showhidden_off": "🙈 Piilotetut laitteet piilotettu",
+
     # ── Telegram: history ─────────────────────────────────────────────
     "tg_history_header": "📈 *Historia ({time})* ({timestamp})\n",
     "tg_history_detail_header": "📈 *{name} - Historia ({time})* ({timestamp})\n",
@@ -133,6 +140,9 @@ STRINGS: dict = {
         "*Laitteiden hallinta:*\n"
         "/devices - Listaa laitteet numeroineen\n"
         "/rename <nro> <nimi> - Vaihda laitteen alias\n"
+        "/hide <nro> - Piilota laite\n"
+        "/unhide <nro> - Näytä laite\n"
+        "/showhidden - Näytä/piilota piilotetut\n"
         "\n"
         "*Historia ja tilastot:*\n"
         "/history [anturi] [aika] - Historia + sää\n"
@@ -215,6 +225,7 @@ STRINGS: dict = {
     "tui_cmd_graph": "[g <n>] graafi",
     "tui_cmd_status_toggle": "[t] tila",
     "tui_cmd_summary_toggle": "[y] yhteenveto",
+    "tui_cmd_show_hidden": "[f] piilotetut",
     "tui_cmd_rename": "[n <n> <nimi>] nimeä",
     "tui_cmd_site_name": "[p <nimi>] paikka",
     "tui_cmd_weather_refresh": "[wr] päivitä sää",
@@ -246,6 +257,7 @@ STRINGS: dict = {
     "tui_devices_col_mac": "MAC",
     "tui_devices_col_type": "Tyyppi",
     "tui_devices_rename_hint": "Nimeä: n <nro> <nimi>   Poista alias: n <nro> -",
+    "tui_devices_hide_hint": "Piilota: hide <nro>   Näytä: unhide <nro>",
 
     # ── TUI: graph view ───────────────────────────────────────────────
     "tui_graph_no_data": "Ei dataa",
@@ -284,6 +296,12 @@ STRINGS: dict = {
     "tui_geocode_not_found": "Paikkaa '{query}' ei löytynyt",
     "tui_geocode_error": "Geokoodausvirhe: {error}",
     "tui_unknown_command": "Tuntematon komento: {cmd}",
+    "tui_hide_success": "Laite {name} piilotettu",
+    "tui_unhide_success": "Laite {name} näytetään",
+    "tui_hide_not_found": "Laitetta ei löytynyt: {id}",
+    "tui_show_hidden_on": "Piilotetut laitteet näytetään",
+    "tui_show_hidden_off": "Piilotetut laitteet piilotettu",
+    "tui_hidden_marker": "[H]",
 
     # ── Remote sites ─────────────────────────────────────────────────
     "remote_offline": "ei yhteyttä",

@@ -87,6 +87,13 @@ STRINGS: dict = {
     "tg_rename_cleared": "✅ Device {order} alias removed",
     "tg_rename_failed": "Rename failed",
 
+    # ── Telegram: hide/unhide ────────────────────────────────────────
+    "tg_hide_success": "✅ Device *{name}* hidden",
+    "tg_unhide_success": "✅ Device *{name}* visible",
+    "tg_hide_not_found": "❌ Device not found: {id}",
+    "tg_showhidden_on": "👁 Showing hidden devices",
+    "tg_showhidden_off": "🙈 Hidden devices not shown",
+
     # ── Telegram: history ─────────────────────────────────────────────
     "tg_history_header": "📈 *History ({time})* ({timestamp})\n",
     "tg_history_detail_header": "📈 *{name} - History ({time})* ({timestamp})\n",
@@ -135,6 +142,9 @@ STRINGS: dict = {
         "*Device management:*\n"
         "/devices - List devices with numbers\n"
         "/rename <num> <name> - Set device alias\n"
+        "/hide <num> - Hide device\n"
+        "/unhide <num> - Show device\n"
+        "/showhidden - Toggle hidden devices\n"
         "\n"
         "*History and statistics:*\n"
         "/history [sensor] [time] - History + weather\n"
@@ -217,6 +227,7 @@ STRINGS: dict = {
     "tui_cmd_graph": "[g <n>] graph",
     "tui_cmd_status_toggle": "[t] status",
     "tui_cmd_summary_toggle": "[y] summary",
+    "tui_cmd_show_hidden": "[f] hidden",
     "tui_cmd_rename": "[n <n> <name>] rename",
     "tui_cmd_site_name": "[p <name>] site",
     "tui_cmd_weather_refresh": "[wr] refresh weather",
@@ -248,6 +259,7 @@ STRINGS: dict = {
     "tui_devices_col_mac": "MAC",
     "tui_devices_col_type": "Type",
     "tui_devices_rename_hint": "Rename: n <num> <name>   Clear alias: n <num> -",
+    "tui_devices_hide_hint": "Hide: hide <num>   Show: unhide <num>",
 
     # ── TUI: graph view ───────────────────────────────────────────────
     "tui_graph_no_data": "No data",
@@ -286,6 +298,12 @@ STRINGS: dict = {
     "tui_geocode_not_found": "Place '{query}' not found",
     "tui_geocode_error": "Geocoding error: {error}",
     "tui_unknown_command": "Unknown command: {cmd}",
+    "tui_hide_success": "Device {name} hidden",
+    "tui_unhide_success": "Device {name} visible",
+    "tui_hide_not_found": "Device not found: {id}",
+    "tui_show_hidden_on": "Showing hidden devices",
+    "tui_show_hidden_off": "Hidden devices not shown",
+    "tui_hidden_marker": "[H]",
 
     # ── Remote sites ─────────────────────────────────────────────────
     "remote_offline": "offline",
