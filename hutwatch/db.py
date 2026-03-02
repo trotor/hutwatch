@@ -77,6 +77,13 @@ class Database:
             )
         """)
 
+        # Migration: add hidden column
+        try:
+            self._conn.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER DEFAULT 0")
+            self._conn.commit()
+        except Exception:
+            pass  # Column already exists
+
         # Weather table for external weather data
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS weather (
@@ -275,7 +282,7 @@ class Database:
             return None
 
         cursor = self._conn.execute(
-            "SELECT mac, alias, display_order, sensor_type FROM devices WHERE mac = ?",
+            "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE mac = ?",
             (mac.upper(),),
         )
         row = cursor.fetchone()
@@ -285,23 +292,28 @@ class Database:
                 alias=row["alias"],
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
+                hidden=bool(row["hidden"]),
             )
         return None
 
-    def get_all_devices(self) -> list[DeviceInfo]:
+    def get_all_devices(self, include_hidden: bool = False) -> list[DeviceInfo]:
         """Get all devices ordered by display_order."""
         if not self._conn:
             return []
 
-        cursor = self._conn.execute(
-            "SELECT mac, alias, display_order, sensor_type FROM devices ORDER BY display_order"
-        )
+        if include_hidden:
+            query = "SELECT mac, alias, display_order, sensor_type, hidden FROM devices ORDER BY display_order"
+        else:
+            query = "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE hidden = 0 ORDER BY display_order"
+
+        cursor = self._conn.execute(query)
         return [
             DeviceInfo(
                 mac=row["mac"],
                 alias=row["alias"],
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
+                hidden=bool(row["hidden"]),
             )
             for row in cursor.fetchall()
         ]
@@ -344,6 +356,25 @@ class Database:
             logger.error("Error setting device order: %s", e)
             return False
 
+    def set_device_hidden(self, mac: str, hidden: bool) -> bool:
+        """Set device hidden state."""
+        if not self._conn:
+            return False
+
+        try:
+            cursor = self._conn.execute(
+                """
+                UPDATE devices SET hidden = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE mac = ?
+                """,
+                (1 if hidden else 0, mac.upper()),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting device hidden: %s", e)
+            return False
+
     def sync_devices_from_config(self, sensors: list["SensorConfig"]) -> None:
         """Sync devices from config to database.
 
@@ -383,7 +414,7 @@ class Database:
             return None
 
         cursor = self._conn.execute(
-            "SELECT mac, alias, display_order, sensor_type FROM devices WHERE display_order = ?",
+            "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE display_order = ?",
             (order,),
         )
         row = cursor.fetchone()
@@ -393,6 +424,7 @@ class Database:
                 alias=row["alias"],
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
+                hidden=bool(row["hidden"]),
             )
         return None
 
