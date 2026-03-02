@@ -353,6 +353,9 @@ STRINGS: dict = {
         "`/alert <device> high off` - remove high threshold\n"
         "`/alert <device> recovery on/off` - recovery notification"
     ),
+    "alert_available_devices": "*Devices:*",
+    "alert_device_local": "{order}. {name}",
+    "alert_device_remote": "↗ {site} / {name} (`{mac}`)",
     "tui_cmd_alert": "[a] alerts",
     "tui_alert_usage": "Usage: a <num> low/high <value>  or  a <num> low/high off",
     "tui_alert_indicator": "⚠",

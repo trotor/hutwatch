@@ -351,6 +351,9 @@ STRINGS: dict = {
         "`/alert <laite> high off` - poista yläraja\n"
         "`/alert <laite> recovery on/off` - palautumisilmoitus"
     ),
+    "alert_available_devices": "*Laitteet:*",
+    "alert_device_local": "{order}. {name}",
+    "alert_device_remote": "↗ {site} / {name} (`{mac}`)",
     "tui_cmd_alert": "[a] hälytykset",
     "tui_alert_usage": "Käyttö: a <nro> low/high <arvo>  tai  a <nro> low/high off",
     "tui_alert_indicator": "⚠",

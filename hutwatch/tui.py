@@ -1599,7 +1599,7 @@ class TuiDashboard:
     # ── Alerts view ───────────────────────────────────────────────────
 
     def _render_alerts(self, lines: list[str], cols: int) -> None:
-        """Render the alerts list view."""
+        """Render the alerts list view with available devices."""
         lines.append(f"{BOLD}🔔 {t('alert_list_header').strip()}{RESET}")
         lines.append("")
 
@@ -1607,29 +1607,49 @@ class TuiDashboard:
             lines.append(t("alert_none"))
             return
 
+        # Current alerts
         alerts = self._alert_manager.get_alerts()
-        if not alerts:
+        if alerts:
+            for alert in alerts:
+                device = self._db.get_device(alert.mac)
+                if device:
+                    name = device.get_display_name()
+                    order_str = f"{device.display_order}."
+                else:
+                    name = alert.mac
+                    order_str = " "
+                type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+                if not alert.enabled:
+                    status = t("alert_status_disabled")
+                elif alert.triggered:
+                    status = f"{RED}{t('alert_status_triggered')}{RESET}"
+                else:
+                    status = f"{GREEN}{t('alert_status_ok')}{RESET}"
+                recovery = " 🔔" if alert.notify_recovery else ""
+                lines.append(
+                    f"  {order_str} {name}: {type_label} {alert.threshold:.1f}°C {status}{recovery}"
+                )
+        else:
             lines.append(f"  {t('alert_none')}")
-            lines.append("")
-            lines.append(f"  {DIM}{t('tui_alert_usage')}{RESET}")
-            return
 
-        for alert in alerts:
-            device = self._db.get_device(alert.mac)
-            if not device:
-                continue
-            name = device.get_display_name()
-            type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
-            if not alert.enabled:
-                status = t("alert_status_disabled")
-            elif alert.triggered:
-                status = f"{RED}{t('alert_status_triggered')}{RESET}"
-            else:
-                status = f"{GREEN}{t('alert_status_ok')}{RESET}"
-            recovery = " 🔔" if alert.notify_recovery else ""
-            lines.append(
-                f"  {device.display_order}. {name}: {type_label} {alert.threshold:.1f}°C {status}{recovery}"
-            )
+        # Available devices
+        lines.append("")
+        lines.append(f"  {BOLD}{t('alert_available_devices')}{RESET}")
+
+        # Local devices
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
+        for device in devices:
+            sensor_config = self._config.get_sensor_by_mac(device.mac)
+            if sensor_config:
+                device.config_name = sensor_config.name
+            lines.append(f"  {device.display_order}. {device.get_display_name()}")
+
+        # Remote devices
+        if self._remote:
+            for site_name, site_data in self._remote.get_all_site_data().items():
+                for sensor in site_data.sensors:
+                    if sensor.mac:
+                        lines.append(f"  ↗ {site_name} / {sensor.name}  {DIM}{sensor.mac}{RESET}")
 
         lines.append("")
         lines.append(f"  {DIM}{t('tui_alert_usage')}{RESET}")

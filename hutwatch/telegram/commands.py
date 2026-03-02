@@ -1557,53 +1557,61 @@ class CommandHandlers:
         )
 
     async def _alert_list(self, update: Update) -> None:
-        """List all configured alerts."""
+        """List all configured alerts and available devices."""
         assert update.effective_message is not None
 
+        lines: list[str] = []
+
+        # Show current alerts
         alerts = self._alert_manager.get_alerts()
-        if not alerts:
-            await update.effective_message.reply_text(
-                t("alert_none"),
-                parse_mode="Markdown",
-            )
-            return
+        if alerts:
+            lines.append(t("alert_list_header"))
+            for alert in alerts:
+                device = self._db.get_device(alert.mac) if self._db else None
+                if device:
+                    sensor_config = self._config.get_sensor_by_mac(device.mac)
+                    if sensor_config:
+                        device.config_name = sensor_config.name
+                    name = device.get_display_name()
+                    order = device.display_order or 0
+                else:
+                    name = alert.mac
+                    order = 0
 
-        lines = [t("alert_list_header")]
-        for alert in alerts:
-            # Get device display name
-            device = self._db.get_device(alert.mac) if self._db else None
-            if device:
-                sensor_config = self._config.get_sensor_by_mac(device.mac)
-                if sensor_config:
-                    device.config_name = sensor_config.name
-                name = device.get_display_name()
-                order = device.display_order or 0
-            else:
-                name = alert.mac
-                order = 0
+                type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+                if not alert.enabled:
+                    status = t("alert_status_disabled")
+                elif alert.triggered:
+                    status = t("alert_status_triggered")
+                else:
+                    status = t("alert_status_ok")
 
-            # Determine type label
-            if alert.alert_type == "temp_low":
-                type_label = t("alert_temp_low")
-            else:
-                type_label = t("alert_temp_high")
+                lines.append(t(
+                    "alert_list_item",
+                    order=order,
+                    name=name,
+                    type=type_label,
+                    threshold=alert.threshold,
+                    status=status,
+                ))
+        else:
+            lines.append(t("alert_none"))
 
-            # Determine status
-            if not alert.enabled:
-                status = t("alert_status_disabled")
-            elif alert.triggered:
-                status = t("alert_status_triggered")
-            else:
-                status = t("alert_status_ok")
+        # Show available devices
+        lines.append("")
+        lines.append(t("alert_available_devices"))
 
-            lines.append(t(
-                "alert_list_item",
-                order=order,
-                name=name,
-                type=type_label,
-                threshold=alert.threshold,
-                status=status,
-            ))
+        # Local devices
+        devices = self._get_devices_with_config_names()
+        for device in devices:
+            lines.append(t("alert_device_local", order=device.display_order, name=device.get_display_name()))
+
+        # Remote devices
+        if self._remote:
+            for site_name, site_data in self._remote.get_all_site_data().items():
+                for sensor in site_data.sensors:
+                    if sensor.mac:
+                        lines.append(t("alert_device_remote", site=site_name, name=sensor.name, mac=sensor.mac))
 
         await update.effective_message.reply_text(
             "\n".join(lines),
