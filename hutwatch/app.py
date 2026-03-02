@@ -42,12 +42,14 @@ class HutWatchApp:
         console_interval: Optional[int] = None,
         use_tui: bool = False,
         api_port: Optional[int] = None,
+        show_hidden: bool = False,
     ) -> None:
         self._config_path = config_path
         self._db_path = db_path or config_path.parent / "hutwatch.db"
         self._console_interval = console_interval
         self._use_tui = use_tui
         self._api_port = api_port
+        self._show_hidden = show_hidden
         self._config: Optional[AppConfig] = None
         self._store: Optional[SensorStore] = None
         self._db: Optional[Database] = None
@@ -177,7 +179,7 @@ class HutWatchApp:
                 interval = self._console_interval if self._console_interval is not None else 30
                 self._console = ConsoleReporter(
                     self._config, self._store, self._db, interval=interval,
-                    remote=self._remote,
+                    remote=self._remote, show_hidden=self._show_hidden,
                 )
                 await self._console.start()
 

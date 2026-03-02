@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
         help="Launch TUI with fake demo data (no config/BLE/network needed)",
     )
 
+    parser.add_argument(
+        "--show-hidden",
+        action="store_true",
+        help="Show hidden devices in console output",
+    )
+
     return parser.parse_args()
 
 
@@ -140,7 +146,7 @@ def main() -> int:
 
     # Run the application
     try:
-        app = HutWatchApp(config_path, console_interval=args.console, use_tui=args.tui, api_port=args.api_port)
+        app = HutWatchApp(config_path, console_interval=args.console, use_tui=args.tui, api_port=args.api_port, show_hidden=args.show_hidden)
         asyncio.run(app.run())
         return 0
     except KeyboardInterrupt:

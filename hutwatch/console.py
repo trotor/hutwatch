@@ -34,12 +34,14 @@ class ConsoleReporter:
         db: Database,
         interval: int = DEFAULT_INTERVAL_SECONDS,
         remote: Optional[object] = None,
+        show_hidden: bool = False,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._interval = interval
         self._remote = remote
+        self._show_hidden = show_hidden
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -122,12 +124,21 @@ class ConsoleReporter:
             return
 
         now = datetime.now()
-        devices = self._db.get_all_devices()
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
         device_map = {d.mac: d for d in devices}
+
+        # Filter out hidden devices from readings
+        if not self._show_hidden:
+            all_devs = self._db.get_all_devices(include_hidden=True)
+            hidden_macs = {d.mac for d in all_devs if d.hidden}
+        else:
+            hidden_macs = set()
 
         # Build rows
         rows: list[tuple[str, str, str, str, str]] = []
         for mac, reading in sorted(readings.items()):
+            if mac in hidden_macs:
+                continue
             device = device_map.get(mac)
             name = device.get_display_name() if device else mac
 
