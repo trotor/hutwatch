@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from .aggregator import Aggregator
+from .alerts import AlertManager
 from .api import ApiServer, build_status_payload
 from .ble.scanner import BleScanner
 from .ble.sensor_store import SensorStore
@@ -55,6 +56,7 @@ class HutWatchApp:
         self._db: Optional[Database] = None
         self._scanner: Optional[BleScanner] = None
         self._aggregator: Optional[Aggregator] = None
+        self._alert_manager: Optional[AlertManager] = None
         self._weather: Optional[WeatherFetcher] = None
         self._bot: Optional["TelegramBot"] = None
         self._console: Optional[ConsoleReporter] = None
@@ -112,6 +114,10 @@ class HutWatchApp:
         self._scanner = BleScanner(self._config, self._store, db=self._db)
         self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
+        # Initialize alert manager
+        self._alert_manager = AlertManager(self._db)
+        self._aggregator.set_alert_manager(self._alert_manager, self._emit_alerts)
+
         # Start API server if configured (CLI --api-port wins over config)
         api_port = self._api_port or self._config.api_port
         if api_port:
@@ -141,7 +147,10 @@ class HutWatchApp:
         _local_mode = self._use_tui or self._console_interval is not None
 
         if not _local_mode and self._config.telegram and _HAS_TELEGRAM:
-            self._bot = TelegramBot(self._config, self._store, self._db, self._weather, remote=self._remote)
+            self._bot = TelegramBot(
+                self._config, self._store, self._db, self._weather,
+                remote=self._remote, alert_manager=self._alert_manager,
+            )
         elif _local_mode and self._config.telegram:
             logger.info("Local mode active, skipping Telegram bot")
         elif self._config.telegram and not _HAS_TELEGRAM:
@@ -172,7 +181,7 @@ class HutWatchApp:
             if self._use_tui:
                 self._tui = TuiDashboard(
                     self._config, self._store, self._db, self._weather,
-                    app=self, remote=self._remote,
+                    app=self, remote=self._remote, alert_manager=self._alert_manager,
                 )
                 await self._tui.start()
             else:
@@ -284,6 +293,38 @@ class HutWatchApp:
         if self._aggregator:
             return await self._aggregator.fetch_weather_now()
         return False
+
+    async def _emit_alerts(self, events: list) -> None:
+        """Route alert events to the active UI."""
+        from .alerts import AlertEvent
+        from .i18n import t
+
+        for event in events:
+            if event.is_recovery:
+                text = t("alert_recovery",
+                         name=event.device_name,
+                         temp=event.current_value,
+                         threshold=event.threshold)
+            else:
+                direction = t("alert_direction_below") if event.alert_type == "temp_low" else t("alert_direction_above")
+                text = t("alert_triggered",
+                         name=event.device_name,
+                         temp=event.current_value,
+                         direction=direction,
+                         threshold=event.threshold)
+
+            # Send to Telegram
+            if self._bot:
+                try:
+                    await self._bot.send_message(text)
+                except Exception as e:
+                    logger.error("Failed to send alert to Telegram: %s", e)
+
+            # Send to TUI
+            if self._tui:
+                self._tui.add_alert_event(event)
+
+            logger.info("Alert: %s", text)
 
     async def run(self) -> None:
         """Run the application until shutdown signal."""

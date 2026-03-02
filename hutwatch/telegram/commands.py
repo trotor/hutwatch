@@ -44,12 +44,14 @@ class CommandHandlers:
         db: Optional["Database"] = None,
         weather: Optional["WeatherFetcher"] = None,
         remote: Optional["RemotePoller"] = None,
+        alert_manager: Optional[object] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._weather = weather
         self._remote = remote
+        self._alert_manager = alert_manager
         self._reports_enabled = False
         self._show_hidden: bool = False
         self._start_time = datetime.now()
@@ -360,7 +362,11 @@ class CommandHandlers:
             )
             return
 
-        devices = self._get_devices_with_config_names()
+        devices = self._db.get_all_devices(include_hidden=True)
+        for device in devices:
+            sensor_config = self._config.get_sensor_by_mac(device.mac)
+            if sensor_config:
+                device.config_name = sensor_config.name
 
         if not devices:
             await update.effective_message.reply_text(
@@ -372,8 +378,9 @@ class CommandHandlers:
 
         for device in devices:
             display_name = device.get_full_display_name()
+            hidden_mark = f" {t('tg_hidden_marker')}" if device.hidden else ""
             lines.append(
-                f"{device.display_order}. {display_name} - `{device.mac}` ({device.sensor_type})"
+                f"{device.display_order}. {display_name} - `{device.mac}` ({device.sensor_type}){hidden_mark}"
             )
 
         await update.effective_message.reply_text(

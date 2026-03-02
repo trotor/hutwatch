@@ -34,13 +34,15 @@ class TelegramBot:
         db: Optional["Database"] = None,
         weather: Optional["WeatherFetcher"] = None,
         remote: Optional[object] = None,
+        alert_manager: Optional[object] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._weather = weather
+        self._alert_manager = alert_manager
         self._app: Optional[Application] = None
-        self._commands = CommandHandlers(config, store, db, weather, remote=remote)
+        self._commands = CommandHandlers(config, store, db, weather, remote=remote, alert_manager=alert_manager)
         self._scheduler = ReportScheduler(config, store, self._commands, weather, remote=remote)
 
         if not config.telegram:

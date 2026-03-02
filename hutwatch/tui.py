@@ -99,6 +99,7 @@ class TuiDashboard:
         weather: Optional[WeatherFetcher] = None,
         app: Optional[object] = None,
         remote: Optional[object] = None,
+        alert_manager: Optional[object] = None,
     ) -> None:
         self._config = config
         self._store = store
@@ -106,6 +107,7 @@ class TuiDashboard:
         self._weather = weather
         self._app = app  # HutWatchApp reference for dynamic setup
         self._remote = remote  # RemotePoller reference
+        self._alert_manager = alert_manager
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._start_time = datetime.now()
@@ -132,6 +134,11 @@ class TuiDashboard:
     def set_weather(self, weather: WeatherFetcher) -> None:
         """Update weather fetcher reference (called by app after dynamic setup)."""
         self._weather = weather
+
+    def add_alert_event(self, event: object) -> None:
+        """Receive an alert event from AlertManager (via app callback)."""
+        # Will be fully implemented in the TUI alert UI task
+        logger.info("TUI received alert event: %s", event)
 
     async def start(self) -> None:
         """Start the TUI dashboard."""
@@ -1490,7 +1497,7 @@ class TuiDashboard:
 
     def _render_devices(self, lines: list[str], cols: int) -> None:
         """Render device list with MAC, type, alias, and order."""
-        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
+        devices = self._db.get_all_devices(include_hidden=True)
 
         lines.append("")
         lines.append(f"{BOLD}  {t('tui_view_devices')}{RESET}")
