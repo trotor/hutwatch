@@ -13,6 +13,7 @@ from .db import Database
 from .models import AppConfig
 
 if TYPE_CHECKING:
+    from .remote import RemotePoller
     from .weather import WeatherFetcher
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class Aggregator:
         self._last_aggregation: dict[str, datetime] = {}
         self._alert_manager: Optional[AlertManager] = None
         self._alert_callback = None  # async callable(list[AlertEvent])
+        self._remote: Optional["RemotePoller"] = None
 
     async def start(self) -> None:
         """Start the aggregator."""
@@ -64,10 +66,13 @@ class Aggregator:
         if self._running and not self._weather_task:
             self._weather_task = asyncio.create_task(self._run_weather())
 
-    def set_alert_manager(self, manager: AlertManager, callback) -> None:
+    def set_alert_manager(
+        self, manager: AlertManager, callback, remote: Optional["RemotePoller"] = None,
+    ) -> None:
         """Set alert manager and callback for alert events."""
         self._alert_manager = manager
         self._alert_callback = callback
+        self._remote = remote
 
     async def fetch_weather_now(self) -> bool:
         """Fetch weather on demand. Returns True if successful."""
@@ -183,6 +188,8 @@ class Aggregator:
             try:
                 current_readings = {}
                 device_names = {}
+
+                # Local sensors
                 for sensor_config in self._config.sensors:
                     mac = sensor_config.mac
                     history = self._store.get_history(mac, hours=1)
@@ -193,6 +200,25 @@ class Aggregator:
                             device_names[mac] = device.get_display_name()
                         else:
                             device_names[mac] = sensor_config.name
+
+                # Remote/peer sensors
+                if self._remote:
+                    from .models import SensorReading
+
+                    for site_name, site_data in self._remote.get_all_site_data().items():
+                        if not site_data.online:
+                            continue
+                        for sensor in site_data.sensors:
+                            if sensor.mac and sensor.temperature is not None:
+                                mac = sensor.mac.upper()
+                                if mac not in current_readings:
+                                    current_readings[mac] = SensorReading(
+                                        mac=mac,
+                                        timestamp=datetime.now(),
+                                        temperature=sensor.temperature,
+                                        humidity=sensor.humidity,
+                                    )
+                                    device_names[mac] = f"{site_name} / {sensor.name}"
 
                 events = self._alert_manager.check(current_readings, device_names)
                 if events:

@@ -114,9 +114,8 @@ class HutWatchApp:
         self._scanner = BleScanner(self._config, self._store, db=self._db)
         self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
-        # Initialize alert manager
+        # Initialize alert manager (wired to aggregator after remote poller is created)
         self._alert_manager = AlertManager(self._db)
-        self._aggregator.set_alert_manager(self._alert_manager, self._emit_alerts)
 
         # Start API server if configured (CLI --api-port wins over config)
         api_port = self._api_port or self._config.api_port
@@ -142,6 +141,11 @@ class HutWatchApp:
             # Connect API server to remote poller for incoming sync
             if self._api:
                 self._api.set_remote_poller(self._remote)
+
+        # Wire alert manager to aggregator (after remote poller so alerts cover remote devices)
+        self._aggregator.set_alert_manager(
+            self._alert_manager, self._emit_alerts, remote=self._remote,
+        )
 
         # Determine local mode (--console or --tui skip Telegram)
         _local_mode = self._use_tui or self._console_interval is not None
