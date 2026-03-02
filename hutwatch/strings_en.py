@@ -93,6 +93,7 @@ STRINGS: dict = {
     "tg_hide_not_found": "❌ Device not found: {id}",
     "tg_showhidden_on": "👁 Showing hidden devices",
     "tg_showhidden_off": "🙈 Hidden devices not shown",
+    "tg_hidden_marker": "🙈",
 
     # ── Telegram: history ─────────────────────────────────────────────
     "tg_history_header": "📈 *History ({time})* ({timestamp})\n",
@@ -321,4 +322,35 @@ STRINGS: dict = {
     "console_col_battery": "Batt",
     "console_col_age": "Age",
     "console_press_enter": "Press Enter to show readings, Ctrl+C to quit",
+
+    # ── Alerts ─────────────────────────────────────────────────────────
+    "alert_temp_low": "low",
+    "alert_temp_high": "high",
+    "alert_triggered": "⚠️ *{name}*: Temperature {temp:.1f}°C {direction} limit {threshold:.1f}°C",
+    "alert_recovery": "✅ *{name}*: Temperature back to normal ({temp:.1f}°C, limit {threshold:.1f}°C)",
+    "alert_direction_below": "below",
+    "alert_direction_above": "above",
+    "alert_none": "No alerts configured",
+    "alert_list_header": "🔔 *Alerts*\n",
+    "alert_list_item": "{order}. *{name}*: {type} {threshold:.1f}°C {status}",
+    "alert_status_ok": "✅",
+    "alert_status_triggered": "⚠️",
+    "alert_status_disabled": "⏸",
+    "alert_set_success": "✅ Alert set: *{name}* {type} {threshold:.1f}°C",
+    "alert_removed": "✅ Alert removed: *{name}* {type}",
+    "alert_not_found": "Alert not found: {name} {type}",
+    "alert_recovery_on": "✅ Recovery notification on: *{name}* {type}",
+    "alert_recovery_off": "✅ Recovery notification off: *{name}* {type}",
+    "tg_alert_usage": (
+        "Usage:\n"
+        "`/alert` - show alerts\n"
+        "`/alert <device> low <value>` - set low threshold\n"
+        "`/alert <device> high <value>` - set high threshold\n"
+        "`/alert <device> low off` - remove low threshold\n"
+        "`/alert <device> high off` - remove high threshold\n"
+        "`/alert <device> recovery on/off` - recovery notification"
+    ),
+    "tui_cmd_alert": "[a] alerts",
+    "tui_alert_usage": "Usage: a <num> low/high <value>  or  a <num> low/high off",
+    "tui_alert_indicator": "⚠",
 }

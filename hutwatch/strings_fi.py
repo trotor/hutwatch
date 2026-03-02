@@ -91,6 +91,7 @@ STRINGS: dict = {
     "tg_hide_not_found": "❌ Laitetta ei löytynyt: {id}",
     "tg_showhidden_on": "👁 Piilotetut laitteet näytetään",
     "tg_showhidden_off": "🙈 Piilotetut laitteet piilotettu",
+    "tg_hidden_marker": "🙈",
 
     # ── Telegram: history ─────────────────────────────────────────────
     "tg_history_header": "📈 *Historia ({time})* ({timestamp})\n",
@@ -319,4 +320,35 @@ STRINGS: dict = {
     "console_col_battery": "Akku",
     "console_col_age": "Ikä",
     "console_press_enter": "Paina Enter näyttääksesi lukemat, Ctrl+C lopettaaksesi",
+
+    # ── Alerts ─────────────────────────────────────────────────────────
+    "alert_temp_low": "alaraja",
+    "alert_temp_high": "yläraja",
+    "alert_triggered": "⚠️ *{name}*: Lämpötila {temp:.1f}°C {direction} rajan {threshold:.1f}°C",
+    "alert_recovery": "✅ *{name}*: Lämpötila palautunut normaaliksi ({temp:.1f}°C, raja {threshold:.1f}°C)",
+    "alert_direction_below": "alittaa",
+    "alert_direction_above": "ylittää",
+    "alert_none": "Ei hälytyksiä asetettu",
+    "alert_list_header": "🔔 *Hälytykset*\n",
+    "alert_list_item": "{order}. *{name}*: {type} {threshold:.1f}°C {status}",
+    "alert_status_ok": "✅",
+    "alert_status_triggered": "⚠️",
+    "alert_status_disabled": "⏸",
+    "alert_set_success": "✅ Hälytys asetettu: *{name}* {type} {threshold:.1f}°C",
+    "alert_removed": "✅ Hälytys poistettu: *{name}* {type}",
+    "alert_not_found": "Hälytystä ei löytynyt: {name} {type}",
+    "alert_recovery_on": "✅ Palautumisilmoitus päällä: *{name}* {type}",
+    "alert_recovery_off": "✅ Palautumisilmoitus pois: *{name}* {type}",
+    "tg_alert_usage": (
+        "Käyttö:\n"
+        "`/alert` - näytä hälytykset\n"
+        "`/alert <laite> low <arvo>` - aseta alaraja\n"
+        "`/alert <laite> high <arvo>` - aseta yläraja\n"
+        "`/alert <laite> low off` - poista alaraja\n"
+        "`/alert <laite> high off` - poista yläraja\n"
+        "`/alert <laite> recovery on/off` - palautumisilmoitus"
+    ),
+    "tui_cmd_alert": "[a] hälytykset",
+    "tui_alert_usage": "Käyttö: a <nro> low/high <arvo>  tai  a <nro> low/high off",
+    "tui_alert_indicator": "⚠",
 }
