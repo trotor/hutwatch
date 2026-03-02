@@ -1442,6 +1442,174 @@ class CommandHandlers:
         msg = t("tg_showhidden_on") if self._show_hidden else t("tg_showhidden_off")
         await update.effective_message.reply_text(msg, parse_mode="Markdown")
 
+    async def alert(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /alert command - manage temperature alerts."""
+        if not update.effective_message or not self._db:
+            return
+
+        if not self._alert_manager:
+            await update.effective_message.reply_text(
+                t("common_db_not_available"),
+                parse_mode="Markdown",
+            )
+            return
+
+        args = context.args or []
+
+        # No args → list all alerts
+        if not args:
+            await self._alert_list(update)
+            return
+
+        # Need at least 3 args: <device...> <type> <value>
+        if len(args) < 3:
+            await update.effective_message.reply_text(
+                t("tg_alert_usage"),
+                parse_mode="Markdown",
+            )
+            return
+
+        # Last arg is value, second-to-last is type, rest is device identifier
+        value_str = args[-1]
+        alert_type_str = args[-2].lower()
+        identifier = " ".join(args[:-2])
+
+        # Resolve device
+        device = self._resolve_device(identifier)
+        if not device:
+            await update.effective_message.reply_text(
+                t("common_sensor_not_found", identifier=identifier),
+                parse_mode="Markdown",
+            )
+            return
+
+        name = device.get_display_name()
+
+        # Handle recovery on/off
+        if alert_type_str == "recovery":
+            enabled = value_str.lower() == "on"
+            # Set recovery for both alert types on this device
+            found = False
+            for atype in ("temp_low", "temp_high"):
+                if self._alert_manager.set_notify_recovery(device.mac, atype, enabled):
+                    found = True
+            if found:
+                type_label = t("alert_temp_low") + "/" + t("alert_temp_high")
+                key = "alert_recovery_on" if enabled else "alert_recovery_off"
+                await update.effective_message.reply_text(
+                    t(key, name=name, type=type_label),
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.effective_message.reply_text(
+                    t("alert_not_found", name=name, type="recovery"),
+                    parse_mode="Markdown",
+                )
+            return
+
+        # Validate alert type
+        if alert_type_str == "low":
+            alert_type = "temp_low"
+            type_label = t("alert_temp_low")
+        elif alert_type_str == "high":
+            alert_type = "temp_high"
+            type_label = t("alert_temp_high")
+        else:
+            await update.effective_message.reply_text(
+                t("tg_alert_usage"),
+                parse_mode="Markdown",
+            )
+            return
+
+        # Handle "off" → remove alert
+        if value_str.lower() == "off":
+            if self._alert_manager.remove_alert(device.mac, alert_type):
+                await update.effective_message.reply_text(
+                    t("alert_removed", name=name, type=type_label),
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.effective_message.reply_text(
+                    t("alert_not_found", name=name, type=type_label),
+                    parse_mode="Markdown",
+                )
+            return
+
+        # Parse threshold value
+        try:
+            threshold = float(value_str)
+        except ValueError:
+            await update.effective_message.reply_text(
+                t("tg_alert_usage"),
+                parse_mode="Markdown",
+            )
+            return
+
+        # Set alert
+        self._alert_manager.set_alert(device.mac, alert_type, threshold)
+        await update.effective_message.reply_text(
+            t("alert_set_success", name=name, type=type_label, threshold=threshold),
+            parse_mode="Markdown",
+        )
+
+    async def _alert_list(self, update: Update) -> None:
+        """List all configured alerts."""
+        assert update.effective_message is not None
+
+        alerts = self._alert_manager.get_alerts()
+        if not alerts:
+            await update.effective_message.reply_text(
+                t("alert_none"),
+                parse_mode="Markdown",
+            )
+            return
+
+        lines = [t("alert_list_header")]
+        for alert in alerts:
+            # Get device display name
+            device = self._db.get_device(alert.mac) if self._db else None
+            if device:
+                sensor_config = self._config.get_sensor_by_mac(device.mac)
+                if sensor_config:
+                    device.config_name = sensor_config.name
+                name = device.get_display_name()
+                order = device.display_order or 0
+            else:
+                name = alert.mac
+                order = 0
+
+            # Determine type label
+            if alert.alert_type == "temp_low":
+                type_label = t("alert_temp_low")
+            else:
+                type_label = t("alert_temp_high")
+
+            # Determine status
+            if not alert.enabled:
+                status = t("alert_status_disabled")
+            elif alert.triggered:
+                status = t("alert_status_triggered")
+            else:
+                status = t("alert_status_ok")
+
+            lines.append(t(
+                "alert_list_item",
+                order=order,
+                name=name,
+                type=type_label,
+                threshold=alert.threshold,
+                status=status,
+            ))
+
+        await update.effective_message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+        )
+
     def _format_age(self, age: timedelta) -> str:
         """Format timedelta as human-readable string."""
         return format_age_long(age.total_seconds())

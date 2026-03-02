@@ -79,6 +79,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("unhide", self._commands.unhide))
         self._app.add_handler(CommandHandler("nayta", self._commands.unhide))
         self._app.add_handler(CommandHandler("showhidden", self._commands.showhidden))
+        self._app.add_handler(CommandHandler("alert", self._commands.alert))
+        self._app.add_handler(CommandHandler("halytys", self._commands.alert))
         self._app.add_handler(CommandHandler("help", self._commands.help))
         self._app.add_handler(CommandHandler("start", self._commands.menu))
 
