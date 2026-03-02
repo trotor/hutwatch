@@ -131,6 +131,7 @@ class DeviceInfo:
     alias: Optional[str]
     display_order: int
     sensor_type: str
+    hidden: bool = False
     config_name: Optional[str] = None
 
     def __post_init__(self) -> None:
