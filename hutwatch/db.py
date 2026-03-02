@@ -113,6 +113,21 @@ class Database:
             )
         """)
 
+        # Alerts table for temperature threshold alerts
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                mac TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                threshold REAL NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                triggered INTEGER DEFAULT 0,
+                notify_recovery INTEGER DEFAULT 0,
+                last_triggered DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (mac, alert_type)
+            )
+        """)
+
         self._conn.commit()
         logger.debug("Database tables created")
 
@@ -373,6 +388,93 @@ class Database:
             return cursor.rowcount > 0
         except Exception as e:
             logger.error("Error setting device hidden: %s", e)
+            return False
+
+    # Alert management methods
+
+    def set_alert(
+        self, mac: str, alert_type: str, threshold: float, notify_recovery: bool = False,
+    ) -> None:
+        """Create or update an alert rule."""
+        if not self._conn:
+            return
+        try:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO alerts (mac, alert_type, threshold, notify_recovery, enabled, triggered)
+                VALUES (?, ?, ?, ?, 1, 0)
+                """,
+                (mac.upper(), alert_type, threshold, 1 if notify_recovery else 0),
+            )
+            self._conn.commit()
+        except Exception as e:
+            logger.error("Error setting alert: %s", e)
+
+    def remove_alert(self, mac: str, alert_type: str) -> bool:
+        """Remove an alert rule. Returns True if a row was deleted."""
+        if not self._conn:
+            return False
+        try:
+            cursor = self._conn.execute(
+                "DELETE FROM alerts WHERE mac = ? AND alert_type = ?",
+                (mac.upper(), alert_type),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing alert: %s", e)
+            return False
+
+    def get_alerts(self, mac: Optional[str] = None) -> list[dict]:
+        """Get alert rules. If mac is given, filter by device."""
+        if not self._conn:
+            return []
+        if mac:
+            cursor = self._conn.execute(
+                "SELECT * FROM alerts WHERE mac = ? ORDER BY alert_type",
+                (mac.upper(),),
+            )
+        else:
+            cursor = self._conn.execute(
+                "SELECT * FROM alerts ORDER BY mac, alert_type"
+            )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_alert_triggered(self, mac: str, alert_type: str, triggered: bool) -> None:
+        """Update the triggered state and last_triggered timestamp."""
+        if not self._conn:
+            return
+        try:
+            if triggered:
+                self._conn.execute(
+                    """
+                    UPDATE alerts SET triggered = 1, last_triggered = CURRENT_TIMESTAMP
+                    WHERE mac = ? AND alert_type = ?
+                    """,
+                    (mac.upper(), alert_type),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE alerts SET triggered = 0 WHERE mac = ? AND alert_type = ?",
+                    (mac.upper(), alert_type),
+                )
+            self._conn.commit()
+        except Exception as e:
+            logger.error("Error updating alert triggered state: %s", e)
+
+    def set_alert_notify_recovery(self, mac: str, alert_type: str, enabled: bool) -> bool:
+        """Set the notify_recovery flag for an alert. Returns True if updated."""
+        if not self._conn:
+            return False
+        try:
+            cursor = self._conn.execute(
+                "UPDATE alerts SET notify_recovery = ? WHERE mac = ? AND alert_type = ?",
+                (1 if enabled else 0, mac.upper(), alert_type),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting alert notify_recovery: %s", e)
             return False
 
     def sync_devices_from_config(self, sensors: list["SensorConfig"]) -> None:
