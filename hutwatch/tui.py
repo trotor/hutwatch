@@ -48,7 +48,7 @@ AUTO_REFRESH_SECONDS = 10
 # Keys that execute instantly without Enter
 _INSTANT_KEYS = frozenset('qtydrf')
 # Keys that start input mode (may need arguments, confirmed with Enter)
-_INPUT_KEYS = frozenset('hsgnpwu')
+_INPUT_KEYS = frozenset('ahsgnpwu')
 
 
 def _format_age(seconds: float) -> str:
@@ -402,6 +402,10 @@ class TuiDashboard:
                 self._status_msg = t("tui_weather_not_available")
             return
 
+        if cmd == "a":
+            self._handle_alert_cmd(parts[1:])
+            return
+
         if cmd in ("hide", "unhide"):
             if len(parts) < 2:
                 self._status_msg = t("tui_hide_not_found", id="?")
@@ -578,6 +582,60 @@ class TuiDashboard:
             self._status_msg = t("tui_geocode_error", error=e)
             return None
 
+    def _handle_alert_cmd(self, args: list[str]) -> None:
+        """Handle alert command: a, a <n> low/high <value>, a <n> low/high off."""
+        if not self._alert_manager:
+            self._status_msg = t("common_db_not_available")
+            return
+
+        if not args:
+            self._view = "alerts"
+            return
+
+        if len(args) < 3:
+            self._status_msg = t("tui_alert_usage")
+            return
+
+        identifier = args[0]
+        device = resolve_device(identifier, self._db, self._config)
+        if not device:
+            self._status_msg = t("tui_sensor_not_found", identifier=identifier)
+            return
+
+        action = args[1].lower()
+        value = args[2].lower()
+        name = device.get_display_name()
+
+        if action == "recovery":
+            enabled = value == "on"
+            for at in ("temp_low", "temp_high"):
+                self._alert_manager.set_notify_recovery(device.mac, at, enabled)
+            msg_key = "alert_recovery_on" if enabled else "alert_recovery_off"
+            type_label = t("alert_temp_low") + "/" + t("alert_temp_high")
+            self._status_msg = t(msg_key, name=name, type=type_label)
+            return
+
+        if action not in ("low", "high"):
+            self._status_msg = t("tui_alert_usage")
+            return
+
+        alert_type = "temp_low" if action == "low" else "temp_high"
+        type_label = t("alert_temp_low") if action == "low" else t("alert_temp_high")
+
+        if value == "off":
+            if self._alert_manager.remove_alert(device.mac, alert_type):
+                self._status_msg = t("alert_removed", name=name, type=type_label)
+            else:
+                self._status_msg = t("alert_not_found", name=name, type=type_label)
+        else:
+            try:
+                threshold = float(value)
+            except ValueError:
+                self._status_msg = t("tui_alert_usage")
+                return
+            self._alert_manager.set_alert(device.mac, alert_type, threshold)
+            self._status_msg = t("alert_set_success", name=name, type=type_label, threshold=threshold)
+
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
         """Resolve device by order number, alias, config name, or MAC."""
         return resolve_device(identifier, self._db, self._config)
@@ -643,6 +701,8 @@ class TuiDashboard:
             self._render_devices(lines, cols)
         elif self._view == "graph":
             self._render_graph(lines, cols)
+        elif self._view == "alerts":
+            self._render_alerts(lines, cols)
 
         self._render_footer(lines, cols)
 
@@ -667,6 +727,7 @@ class TuiDashboard:
             "stats": f" / {t('tui_view_stats')} ({self._time_str()})",
             "devices": f" / {t('tui_view_devices')}",
             "graph": f" / {t('tui_view_graph')} ({self._time_str()})",
+            "alerts": f" / {t('alert_list_header').strip()}",
         }.get(self._view, "")
 
         # Peer sync indicator
@@ -704,7 +765,7 @@ class TuiDashboard:
             return
 
         if self._view == "dashboard":
-            cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph")]
+            cmds = [t("tui_cmd_history"), t("tui_cmd_stats"), t("tui_cmd_devices"), t("tui_cmd_graph"), t("tui_cmd_alert")]
             cmds.append(t("tui_cmd_status_toggle"))
             cmds.append(t("tui_cmd_summary_toggle"))
             cmds.append(t("tui_cmd_show_hidden"))
@@ -789,6 +850,13 @@ class TuiDashboard:
                     stats = self._db.get_stats(mac, hours=24)
                     if stats:
                         parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
+
+                # Alert indicator
+                if self._alert_manager:
+                    for alert in self._alert_manager.get_alerts(mac):
+                        if alert.triggered:
+                            parts.append(f"{RED}{t('tui_alert_indicator')}{RESET}")
+                            break
 
                 result.append("  ".join(parts))
 
@@ -1527,6 +1595,44 @@ class TuiDashboard:
         lines.append("")
         lines.append(f"  {DIM}{t('tui_devices_rename_hint')}{RESET}")
         lines.append(f"  {DIM}{t('tui_devices_hide_hint')}{RESET}")
+
+    # ── Alerts view ───────────────────────────────────────────────────
+
+    def _render_alerts(self, lines: list[str], cols: int) -> None:
+        """Render the alerts list view."""
+        lines.append(f"{BOLD}🔔 {t('alert_list_header').strip()}{RESET}")
+        lines.append("")
+
+        if not self._alert_manager:
+            lines.append(t("alert_none"))
+            return
+
+        alerts = self._alert_manager.get_alerts()
+        if not alerts:
+            lines.append(f"  {t('alert_none')}")
+            lines.append("")
+            lines.append(f"  {DIM}{t('tui_alert_usage')}{RESET}")
+            return
+
+        for alert in alerts:
+            device = self._db.get_device(alert.mac)
+            if not device:
+                continue
+            name = device.get_display_name()
+            type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+            if not alert.enabled:
+                status = t("alert_status_disabled")
+            elif alert.triggered:
+                status = f"{RED}{t('alert_status_triggered')}{RESET}"
+            else:
+                status = f"{GREEN}{t('alert_status_ok')}{RESET}"
+            recovery = " 🔔" if alert.notify_recovery else ""
+            lines.append(
+                f"  {device.display_order}. {name}: {type_label} {alert.threshold:.1f}°C {status}{recovery}"
+            )
+
+        lines.append("")
+        lines.append(f"  {DIM}{t('tui_alert_usage')}{RESET}")
 
     # ── Graph view ────────────────────────────────────────────────────
 
