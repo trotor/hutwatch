@@ -51,6 +51,7 @@ class CommandHandlers:
         self._weather = weather
         self._remote = remote
         self._reports_enabled = False
+        self._show_hidden: bool = False
         self._start_time = datetime.now()
 
     def _get_devices_with_config_names(self) -> list[DeviceInfo]:
@@ -58,7 +59,7 @@ class CommandHandlers:
         if not self._db:
             return []
 
-        devices = self._db.get_all_devices()
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
         for device in devices:
             sensor_config = self._config.get_sensor_by_mac(device.mac)
             if sensor_config:
@@ -1354,6 +1355,85 @@ class CommandHandlers:
             parse_mode="Markdown",
             reply_markup=reply_markup,
         )
+
+    async def hide(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /hide command - hide a device."""
+        if not update.effective_message or not self._db:
+            return
+
+        args = context.args
+        if not args:
+            await update.effective_message.reply_text(
+                t("tg_hide_not_found", id="?"),
+                parse_mode="Markdown",
+            )
+            return
+
+        identifier = " ".join(args)
+        device = resolve_device(identifier, self._db, self._config)
+        if not device:
+            await update.effective_message.reply_text(
+                t("tg_hide_not_found", id=identifier),
+                parse_mode="Markdown",
+            )
+            return
+
+        self._db.set_device_hidden(device.mac, True)
+        name = device.get_display_name()
+        await update.effective_message.reply_text(
+            t("tg_hide_success", name=name),
+            parse_mode="Markdown",
+        )
+
+    async def unhide(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /unhide command - unhide a device."""
+        if not update.effective_message or not self._db:
+            return
+
+        args = context.args
+        if not args:
+            await update.effective_message.reply_text(
+                t("tg_hide_not_found", id="?"),
+                parse_mode="Markdown",
+            )
+            return
+
+        identifier = " ".join(args)
+        device = resolve_device(identifier, self._db, self._config)
+        if not device:
+            await update.effective_message.reply_text(
+                t("tg_hide_not_found", id=identifier),
+                parse_mode="Markdown",
+            )
+            return
+
+        self._db.set_device_hidden(device.mac, False)
+        name = device.get_display_name()
+        await update.effective_message.reply_text(
+            t("tg_unhide_success", name=name),
+            parse_mode="Markdown",
+        )
+
+    async def showhidden(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /showhidden command - toggle showing hidden devices."""
+        if not update.effective_message:
+            return
+
+        self._show_hidden = not self._show_hidden
+        msg = t("tg_showhidden_on") if self._show_hidden else t("tg_showhidden_off")
+        await update.effective_message.reply_text(msg, parse_mode="Markdown")
 
     def _format_age(self, age: timedelta) -> str:
         """Format timedelta as human-readable string."""
