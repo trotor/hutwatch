@@ -104,7 +104,7 @@ def resolve_device(
             return device
 
     # Get all devices with config names populated
-    devices = db.get_all_devices()
+    devices = db.get_all_devices(include_hidden=True)
     for d in devices:
         sensor_config = config.get_sensor_by_mac(d.mac)
         if sensor_config:

@@ -32,7 +32,7 @@ def build_status_payload(
     """
     now = datetime.now()
     readings = store.get_all_latest()
-    devices = db.get_all_devices()
+    devices = db.get_all_devices(include_hidden=True)
 
     sensors = []
     for d in sorted(devices, key=lambda x: x.display_order):
