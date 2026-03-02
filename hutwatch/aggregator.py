@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
+from .alerts import AlertManager
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .models import AppConfig
@@ -41,6 +42,8 @@ class Aggregator:
         self._task: Optional[asyncio.Task] = None
         self._weather_task: Optional[asyncio.Task] = None
         self._last_aggregation: dict[str, datetime] = {}
+        self._alert_manager: Optional[AlertManager] = None
+        self._alert_callback = None  # async callable(list[AlertEvent])
 
     async def start(self) -> None:
         """Start the aggregator."""
@@ -60,6 +63,11 @@ class Aggregator:
         self._weather = weather
         if self._running and not self._weather_task:
             self._weather_task = asyncio.create_task(self._run_weather())
+
+    def set_alert_manager(self, manager: AlertManager, callback) -> None:
+        """Set alert manager and callback for alert events."""
+        self._alert_manager = manager
+        self._alert_callback = callback
 
     async def fetch_weather_now(self) -> bool:
         """Fetch weather on demand. Returns True if successful."""
@@ -169,6 +177,28 @@ class Aggregator:
                 temp_min,
                 temp_max,
             )
+
+        # Check alert thresholds
+        if self._alert_manager and self._alert_callback:
+            try:
+                current_readings = {}
+                device_names = {}
+                for sensor_config in self._config.sensors:
+                    mac = sensor_config.mac
+                    history = self._store.get_history(mac, hours=1)
+                    if history:
+                        current_readings[mac] = history[-1]
+                        device = self._db.get_device(mac)
+                        if device:
+                            device_names[mac] = device.get_display_name()
+                        else:
+                            device_names[mac] = sensor_config.name
+
+                events = self._alert_manager.check(current_readings, device_names)
+                if events:
+                    await self._alert_callback(events)
+            except Exception as e:
+                logger.error("Alert check error: %s", e)
 
     async def _run_weather(self) -> None:
         """Weather fetch loop."""
