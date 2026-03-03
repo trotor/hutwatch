@@ -351,12 +351,14 @@ STRINGS: dict = {
         "`/alert <device> high <value>` - set high threshold\n"
         "`/alert <device> low off` - remove low threshold\n"
         "`/alert <device> high off` - remove high threshold\n"
-        "`/alert <device> recovery on/off` - recovery notification"
+        "`/alert <device> recovery on/off` - recovery notification\n"
+        "Remote sensors: `r1`, `r2` etc."
     ),
     "alert_available_devices": "*Devices:*",
     "alert_device_local": "{order}. {name}",
-    "alert_device_remote": "↗ {site} / {name} (`{mac}`)",
+    "alert_device_remote": "{r_id}. ↗ {site} / {name}  (`{mac}`)",
     "tui_cmd_alert": "[a] alerts",
-    "tui_alert_usage": "Usage: a <num> low/high <value>  or  a <num> low/high off",
+    "tui_alert_usage": "Usage: a <num/r1> low/high <value>  or  a <num/r1> low/high off",
+    "tui_alert_cursor_hint": "↑↓ select device  Enter select  Esc cancel  q quit",
     "tui_alert_indicator": "⚠",
 }

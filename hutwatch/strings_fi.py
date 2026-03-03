@@ -349,12 +349,14 @@ STRINGS: dict = {
         "`/alert <laite> high <arvo>` - aseta yläraja\n"
         "`/alert <laite> low off` - poista alaraja\n"
         "`/alert <laite> high off` - poista yläraja\n"
-        "`/alert <laite> recovery on/off` - palautumisilmoitus"
+        "`/alert <laite> recovery on/off` - palautumisilmoitus\n"
+        "Etäanturit: `r1`, `r2` jne."
     ),
     "alert_available_devices": "*Laitteet:*",
     "alert_device_local": "{order}. {name}",
-    "alert_device_remote": "↗ {site} / {name} (`{mac}`)",
+    "alert_device_remote": "{r_id}. ↗ {site} / {name}  (`{mac}`)",
     "tui_cmd_alert": "[a] hälytykset",
-    "tui_alert_usage": "Käyttö: a <nro> low/high <arvo>  tai  a <nro> low/high off",
+    "tui_alert_usage": "Käyttö: a <nro/r1> low/high <arvo>  tai  a <nro/r1> low/high off",
+    "tui_alert_cursor_hint": "↑↓ valitse laite  Enter valitse  Esc peruuta  q lopeta",
     "tui_alert_indicator": "⚠",
 }

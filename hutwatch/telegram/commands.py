@@ -12,6 +12,7 @@ from telegram.ext import ContextTypes
 
 from ..ble.sensor_store import SensorStore
 from ..formatting import (
+    build_remote_device_list,
     create_ascii_graph,
     format_age_long,
     format_uptime,
@@ -69,10 +70,10 @@ class CommandHandlers:
         return devices
 
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
-        """Resolve device by order number, alias, config name, or MAC."""
+        """Resolve device by order number, alias, config name, MAC, or r<N>."""
         if not self._db:
             return None
-        return resolve_device(identifier, self._db, self._config)
+        return resolve_device(identifier, self._db, self._config, self._remote)
 
     def _format_remote_temps_lines(self) -> list[str]:
         """Format remote site sensor data as Telegram Markdown lines."""
@@ -1608,10 +1609,8 @@ class CommandHandlers:
 
         # Remote devices
         if self._remote:
-            for site_name, site_data in self._remote.get_all_site_data().items():
-                for sensor in site_data.sensors:
-                    if sensor.mac:
-                        lines.append(t("alert_device_remote", site=site_name, name=sensor.name, mac=sensor.mac))
+            for r_id, site_name, sensor_name, mac in build_remote_device_list(self._remote):
+                lines.append(t("alert_device_remote", r_id=r_id, site=site_name, name=sensor_name, mac=mac))
 
         await update.effective_message.reply_text(
             "\n".join(lines),

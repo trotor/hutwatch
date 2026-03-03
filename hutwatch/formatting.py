@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
@@ -85,15 +86,49 @@ def compute_cutoff(
         return datetime.now() - timedelta(hours=default_hours)
 
 
+def build_remote_device_list(
+    remote: object,
+) -> list[tuple[str, str, str, str]]:
+    """Build a numbered list of remote devices.
+
+    Returns list of (r_id, site_name, sensor_name, mac) tuples.
+    Sequential r1, r2, ... numbering across all remote sites.
+    """
+    result: list[tuple[str, str, str, str]] = []
+    counter = 1
+    for site_name, site_data in remote.get_all_site_data().items():
+        for sensor in site_data.sensors:
+            if sensor.mac:
+                result.append((f"r{counter}", site_name, sensor.name, sensor.mac))
+                counter += 1
+    return result
+
+
 def resolve_device(
     identifier: str,
     db: Database,
     config: AppConfig,
+    remote: object = None,
 ) -> Optional[DeviceInfo]:
     """Resolve device by order number, alias, config name, or MAC.
 
+    Supports r<N> identifiers for remote devices when remote is provided.
     Returns DeviceInfo with config_name populated if found.
     """
+    from .models import DeviceInfo as _DeviceInfo
+
+    # Try r<N> remote device identifier
+    if remote and re.match(r'^r\d+$', identifier, re.IGNORECASE):
+        for r_id, site_name, sensor_name, mac in build_remote_device_list(remote):
+            if r_id.lower() == identifier.lower():
+                return _DeviceInfo(
+                    mac=mac,
+                    alias=None,
+                    display_order=0,
+                    sensor_type="remote",
+                    config_name=f"{site_name} / {sensor_name}",
+                )
+
     # Try as order number first
     if identifier.isdigit():
         device = db.get_device_by_order(int(identifier))

@@ -22,6 +22,7 @@ except ImportError:
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .formatting import (
+    build_remote_device_list,
     create_ascii_graph,
     format_age,
     parse_time_arg,
@@ -41,6 +42,7 @@ RESET = "\033[0m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
+REVERSE = "\033[7m"
 
 # Refresh interval for auto-update (seconds)
 AUTO_REFRESH_SECONDS = 10
@@ -130,6 +132,8 @@ class TuiDashboard:
         self._input_mode = False  # True when building a command line
         self._input_buffer = ""   # Accumulated input in input mode
         self._old_term_settings = None  # Saved terminal settings for cbreak restore
+        self._esc_state = 0  # ESC sequence state: 0=normal, 1=got ESC, 2=got ESC+[
+        self._alert_cursor: Optional[int] = None  # Cursor position in alerts device list
 
     def set_weather(self, weather: WeatherFetcher) -> None:
         """Update weather fetcher reference (called by app after dynamic setup)."""
@@ -208,11 +212,46 @@ class TuiDashboard:
                 if not ch:
                     return
 
+                # ESC sequence state machine for arrow keys
+                if self._esc_state == 1:
+                    # Got ESC, expecting '['
+                    self._esc_state = 0
+                    if ch == '[':
+                        self._esc_state = 2
+                        return
+                    # Plain ESC: cancel input if in input mode
+                    if self._input_mode:
+                        self._input_mode = False
+                        self._input_buffer = ""
+                        self._render()
+                    elif self._alert_cursor is not None:
+                        self._alert_cursor = None
+                        self._render()
+                    return
+
+                if self._esc_state == 2:
+                    # Got ESC+[, expecting direction letter
+                    self._esc_state = 0
+                    if ch == 'A':
+                        self._handle_arrow_key("up")
+                    elif ch == 'B':
+                        self._handle_arrow_key("down")
+                    # Ignore other CSI sequences
+                    return
+
                 if not self._input_mode:
                     # Idle mode: single keypress handling
                     key = ch.lower()
+                    if ch == '\x1b':
+                        self._esc_state = 1
+                        return
                     if ch == '\n':
-                        # Enter = refresh / back to dashboard
+                        # Enter: in alerts view with cursor, select device
+                        if self._view == "alerts" and self._alert_cursor is not None and not self._input_mode:
+                            self._select_alert_cursor_device()
+                            self._render()
+                            return
+                        # Otherwise: refresh / back to dashboard
                         input_cmd = ""
                         input_event.set()
                     elif key == 'q':
@@ -235,10 +274,8 @@ class TuiDashboard:
                         self._input_buffer = ""
                         input_event.set()
                     elif ch == '\x1b':
-                        # ESC = cancel input
-                        self._input_mode = False
-                        self._input_buffer = ""
-                        self._render()
+                        self._esc_state = 1
+                        return
                     elif ch in ('\x7f', '\b'):
                         # Backspace
                         if len(self._input_buffer) > 1:
@@ -330,6 +367,7 @@ class TuiDashboard:
     def _handle_command(self, line: str) -> None:
         """Parse and execute a user command."""
         self._status_msg = None
+        self._alert_cursor = None  # Reset cursor when executing any command
         parts = line.split()
 
         if not parts:
@@ -590,6 +628,7 @@ class TuiDashboard:
 
         if not args:
             self._view = "alerts"
+            self._alert_cursor = None
             return
 
         if len(args) < 3:
@@ -597,7 +636,7 @@ class TuiDashboard:
             return
 
         identifier = args[0]
-        device = resolve_device(identifier, self._db, self._config)
+        device = resolve_device(identifier, self._db, self._config, self._remote)
         if not device:
             self._status_msg = t("tui_sensor_not_found", identifier=identifier)
             return
@@ -637,8 +676,8 @@ class TuiDashboard:
             self._status_msg = t("alert_set_success", name=name, type=type_label, threshold=threshold)
 
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
-        """Resolve device by order number, alias, config name, or MAC."""
-        return resolve_device(identifier, self._db, self._config)
+        """Resolve device by order number, alias, config name, MAC, or r<N>."""
+        return resolve_device(identifier, self._db, self._config, self._remote)
 
     # ── Shared helpers ────────────────────────────────────────────────
 
@@ -777,6 +816,8 @@ class TuiDashboard:
                 cmds.append(t("tui_cmd_weather_set"))
             cmds.append(t("tui_cmd_quit"))
             help_line = "  ".join(cmds)
+        elif self._view == "alerts":
+            help_line = t("tui_alert_cursor_hint")
         else:
             help_line = t("tui_cmd_back")
 
@@ -1598,8 +1639,59 @@ class TuiDashboard:
 
     # ── Alerts view ───────────────────────────────────────────────────
 
+    def _build_alert_device_list(self) -> list[tuple[str, str]]:
+        """Build ordered list of (device_id, display_name) for alert cursor navigation.
+
+        Local devices first (by display_order), then remote devices (r1, r2...).
+        """
+        items: list[tuple[str, str]] = []
+
+        # Local devices
+        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
+        for device in devices:
+            sensor_config = self._config.get_sensor_by_mac(device.mac)
+            if sensor_config:
+                device.config_name = sensor_config.name
+            items.append((str(device.display_order), f"{device.display_order}. {device.get_display_name()}"))
+
+        # Remote devices
+        if self._remote:
+            for r_id, site_name, sensor_name, mac in build_remote_device_list(self._remote):
+                items.append((r_id, f"{r_id}. ↗ {site_name} / {sensor_name}  {DIM}{mac}{RESET}"))
+
+        return items
+
+    def _handle_arrow_key(self, direction: str) -> None:
+        """Handle arrow key press — navigate cursor in alerts view."""
+        if self._view != "alerts" or self._input_mode:
+            return
+
+        device_list = self._build_alert_device_list()
+        if not device_list:
+            return
+
+        if self._alert_cursor is None:
+            self._alert_cursor = 0
+        elif direction == "up":
+            self._alert_cursor = max(0, self._alert_cursor - 1)
+        elif direction == "down":
+            self._alert_cursor = min(len(device_list) - 1, self._alert_cursor + 1)
+
+        self._render()
+
+    def _select_alert_cursor_device(self) -> None:
+        """On Enter in alerts view with cursor: pre-fill input with selected device."""
+        device_list = self._build_alert_device_list()
+        if not device_list or self._alert_cursor is None:
+            return
+
+        idx = min(self._alert_cursor, len(device_list) - 1)
+        device_id = device_list[idx][0]
+        self._input_mode = True
+        self._input_buffer = f"a {device_id} "
+
     def _render_alerts(self, lines: list[str], cols: int) -> None:
-        """Render the alerts list view with available devices."""
+        """Render the alerts list view with available devices and cursor."""
         lines.append(f"{BOLD}🔔 {t('alert_list_header').strip()}{RESET}")
         lines.append("")
 
@@ -1632,24 +1724,16 @@ class TuiDashboard:
         else:
             lines.append(f"  {t('alert_none')}")
 
-        # Available devices
+        # Available devices with cursor highlight
         lines.append("")
         lines.append(f"  {BOLD}{t('alert_available_devices')}{RESET}")
 
-        # Local devices
-        devices = self._db.get_all_devices(include_hidden=self._show_hidden)
-        for device in devices:
-            sensor_config = self._config.get_sensor_by_mac(device.mac)
-            if sensor_config:
-                device.config_name = sensor_config.name
-            lines.append(f"  {device.display_order}. {device.get_display_name()}")
-
-        # Remote devices
-        if self._remote:
-            for site_name, site_data in self._remote.get_all_site_data().items():
-                for sensor in site_data.sensors:
-                    if sensor.mac:
-                        lines.append(f"  ↗ {site_name} / {sensor.name}  {DIM}{sensor.mac}{RESET}")
+        device_list = self._build_alert_device_list()
+        for idx, (_device_id, display_name) in enumerate(device_list):
+            if self._alert_cursor is not None and idx == self._alert_cursor:
+                lines.append(f"  {REVERSE} ► {display_name} {RESET}")
+            else:
+                lines.append(f"    {display_name}")
 
         lines.append("")
         lines.append(f"  {DIM}{t('tui_alert_usage')}{RESET}")
