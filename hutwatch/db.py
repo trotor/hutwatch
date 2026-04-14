@@ -84,6 +84,13 @@ class Database:
         except Exception:
             pass  # Column already exists
 
+        # Migration: add site column for remote/peer devices
+        try:
+            self._conn.execute("ALTER TABLE devices ADD COLUMN site TEXT DEFAULT NULL")
+            self._conn.commit()
+        except Exception:
+            pass  # Column already exists
+
         # Weather table for external weather data
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS weather (
@@ -297,7 +304,7 @@ class Database:
             return None
 
         cursor = self._conn.execute(
-            "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE mac = ?",
+            "SELECT mac, alias, display_order, sensor_type, hidden, site FROM devices WHERE mac = ?",
             (mac.upper(),),
         )
         row = cursor.fetchone()
@@ -308,20 +315,29 @@ class Database:
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
                 hidden=bool(row["hidden"]),
+                site=row["site"],
             )
         return None
 
-    def get_all_devices(self, include_hidden: bool = False) -> list[DeviceInfo]:
-        """Get all devices ordered by display_order."""
+    def get_all_devices(self, include_hidden: bool = False, site: Optional[str] = None) -> list[DeviceInfo]:
+        """Get all devices ordered by display_order.
+
+        By default returns only local devices (site IS NULL).
+        Pass site="SiteName" to get devices for a specific remote site.
+        """
         if not self._conn:
             return []
 
-        if include_hidden:
-            query = "SELECT mac, alias, display_order, sensor_type, hidden FROM devices ORDER BY display_order"
+        if site is not None:
+            query = "SELECT mac, alias, display_order, sensor_type, hidden, site FROM devices WHERE site = ? ORDER BY display_order"
+            cursor = self._conn.execute(query, (site,))
+        elif include_hidden:
+            query = "SELECT mac, alias, display_order, sensor_type, hidden, site FROM devices WHERE site IS NULL ORDER BY display_order"
+            cursor = self._conn.execute(query)
         else:
-            query = "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE hidden = 0 ORDER BY display_order"
+            query = "SELECT mac, alias, display_order, sensor_type, hidden, site FROM devices WHERE site IS NULL AND hidden = 0 ORDER BY display_order"
+            cursor = self._conn.execute(query)
 
-        cursor = self._conn.execute(query)
         return [
             DeviceInfo(
                 mac=row["mac"],
@@ -329,6 +345,7 @@ class Database:
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
                 hidden=bool(row["hidden"]),
+                site=row["site"],
             )
             for row in cursor.fetchall()
         ]
@@ -339,7 +356,7 @@ class Database:
             return False
 
         try:
-            self._conn.execute(
+            cursor = self._conn.execute(
                 """
                 UPDATE devices SET alias = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE mac = ?
@@ -485,11 +502,11 @@ class Database:
         if not self._conn:
             return
 
-        # Get existing devices
-        cursor = self._conn.execute("SELECT mac FROM devices")
+        # Get existing local devices
+        cursor = self._conn.execute("SELECT mac FROM devices WHERE site IS NULL")
         existing_macs = {row["mac"] for row in cursor.fetchall()}
 
-        # Get next available order number
+        # Get next available order number (shared sequence across all devices)
         cursor = self._conn.execute("SELECT MAX(display_order) FROM devices")
         row = cursor.fetchone()
         next_order = (row[0] or 0) + 1
@@ -510,13 +527,65 @@ class Database:
 
         self._conn.commit()
 
+    def sync_remote_devices(self, site_name: str, sensors: list[dict]) -> None:
+        """Sync remote device names from peer into devices table.
+
+        Updates alias from the remote name on each sync. The remote site
+        is authoritative for its own device names.
+        """
+        if not self._conn:
+            return
+
+        try:
+            existing = {
+                row["mac"]
+                for row in self._conn.execute(
+                    "SELECT mac FROM devices WHERE site = ?", (site_name,)
+                ).fetchall()
+            }
+
+            # Get next available order number (shared sequence with local devices)
+            row = self._conn.execute("SELECT MAX(display_order) FROM devices").fetchone()
+            next_order = (row[0] or 0) + 1
+
+            for s in sensors:
+                mac = s.get("mac", "").upper()
+                if not mac:
+                    continue
+                name = s.get("name") or None
+                sensor_type = s.get("type", "unknown")
+
+                if mac in existing:
+                    self._conn.execute(
+                        """
+                        UPDATE devices SET alias = ?, sensor_type = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE mac = ? AND site = ?
+                        """,
+                        (name, sensor_type, mac, site_name),
+                    )
+                else:
+                    self._conn.execute(
+                        """
+                        INSERT INTO devices (mac, alias, display_order, sensor_type, site)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (mac, name, next_order, sensor_type, site_name),
+                    )
+                    next_order += 1
+
+            self._conn.commit()
+            logger.debug("Synced %d remote devices for site %s", len(sensors), site_name)
+        except Exception as e:
+            logger.error("Error syncing remote devices for %s: %s", site_name, e)
+
     def get_device_by_order(self, order: int) -> Optional[DeviceInfo]:
-        """Get device by display order number."""
+        """Get device by display order number (local devices only)."""
         if not self._conn:
             return None
 
         cursor = self._conn.execute(
-            "SELECT mac, alias, display_order, sensor_type, hidden FROM devices WHERE display_order = ?",
+            "SELECT mac, alias, display_order, sensor_type, hidden, site FROM devices WHERE display_order = ? AND site IS NULL",
             (order,),
         )
         row = cursor.fetchone()
@@ -527,6 +596,7 @@ class Database:
                 display_order=row["display_order"],
                 sensor_type=row["sensor_type"],
                 hidden=bool(row["hidden"]),
+                site=row["site"],
             )
         return None
 

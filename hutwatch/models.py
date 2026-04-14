@@ -133,6 +133,7 @@ class DeviceInfo:
     sensor_type: str
     hidden: bool = False
     config_name: Optional[str] = None
+    site: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.mac = self.mac.upper()

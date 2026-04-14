@@ -153,6 +153,7 @@ class RemotePoller:
             site_data = _parse_site_data(data, site_name)
             self._data[site_name] = site_data
             self._save_cache_to_db(site_name)
+            self._sync_remote_devices(site_name, data.get("sensors", []))
             logger.debug("Stored incoming peer data: %s (%d sensors)",
                          site_name, len(site_data.sensors))
         except Exception as e:
@@ -186,6 +187,11 @@ class RemotePoller:
             logger.info("Loaded cached data for remote site %s", site_name)
         except Exception as e:
             logger.warning("Failed to load cache for remote site %s: %s", site_name, e)
+
+    def _sync_remote_devices(self, site_name: str, sensors: list[dict]) -> None:
+        """Sync remote device names into devices table."""
+        if self._db and hasattr(self._db, "sync_remote_devices"):
+            self._db.sync_remote_devices(site_name, sensors)
 
     def _save_cache_to_db(self, site_name: str) -> None:
         """Save remote site data to database settings table."""
@@ -274,6 +280,7 @@ class RemotePoller:
 
             self._data[site.name] = _parse_site_data(data, site.name)
             self._save_cache_to_db(site.name)
+            self._sync_remote_devices(site.name, data.get("sensors", []))
             logger.debug("Fetched remote site %s: %d sensors",
                          site.name, len(self._data[site.name].sensors))
 
@@ -312,6 +319,7 @@ class RemotePoller:
 
             self._data[site.name] = _parse_site_data(data, site.name)
             self._save_cache_to_db(site.name)
+            self._sync_remote_devices(site.name, data.get("sensors", []))
             logger.debug("Synced with peer %s: %d sensors",
                          site.name, len(self._data[site.name].sensors))
 
