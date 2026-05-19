@@ -63,7 +63,7 @@ def build_status_payload(
 
         sensors.append(entry)
 
-    site_name = db.get_setting("site_name") or None
+    site_name = config.site_name or db.get_setting("site_name") or None
 
     output: dict = {
         "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),

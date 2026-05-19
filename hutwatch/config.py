@@ -67,6 +67,9 @@ def load_config(config_path: Path) -> AppConfig:
             logger.warning("Invalid weather configuration: %s", e)
 
     language = data.get("language", "fi")
+    site_name = data.get("site_name")
+    if site_name is not None:
+        site_name = str(site_name)
 
     api_port = data.get("api_port")
     if api_port is not None:
@@ -126,6 +129,7 @@ def load_config(config_path: Path) -> AppConfig:
         telegram=telegram_config,
         weather=weather_config,
         language=language,
+        site_name=site_name,
         api_port=api_port,
         api_bind=api_bind,
         api_token=api_token,

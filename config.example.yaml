@@ -5,6 +5,12 @@
 # Can also be set with --lang CLI flag
 # language: fi
 
+# Site name for this instance — shown to peers and the central hub when
+# this instance POSTs its data via /api/v1/sync. Also set this on remote
+# sites that don't have TUI access. If unset, the TUI's `p <name>` command
+# (writes to DB) is used as fallback.
+# site_name: "Haukijärvi"
+
 # Sensors: list specific MACs, or use an empty list for pure auto-discovery.
 # Discovery is always on — new sensors are found automatically even when
 # some sensors are pre-configured below.

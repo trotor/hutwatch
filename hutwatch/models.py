@@ -97,6 +97,7 @@ class AppConfig:
     telegram: Optional[TelegramConfig] = None
     weather: Optional[WeatherConfig] = None
     language: str = "fi"
+    site_name: Optional[str] = None
     api_port: Optional[int] = None
     api_bind: str = "0.0.0.0"
     api_token: Optional[str] = None
