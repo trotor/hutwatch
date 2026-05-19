@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -120,7 +121,11 @@ class HutWatchApp:
         # Start API server if configured (CLI --api-port wins over config)
         api_port = self._api_port or self._config.api_port
         if api_port:
-            self._api = ApiServer(self._config, self._store, self._db, self._weather, api_port)
+            self._api = ApiServer(
+                self._config, self._store, self._db, self._weather, api_port,
+                bind=self._config.api_bind,
+                token=self._config.api_token,
+            )
             await self._api.start()
 
         # Start remote poller if remote_sites, peers, or api_port configured
@@ -135,6 +140,9 @@ class HutWatchApp:
                 peers=self._config.peers,
                 db=self._db,
                 local_status_fn=_build_local_status,
+                watchdog_threshold=self._config.peer_watchdog_threshold,
+                watchdog_interval=self._config.peer_watchdog_interval,
+                watchdog_callback=self._on_peer_watchdog_event,
             )
             await self._remote.start()
 
@@ -297,6 +305,35 @@ class HutWatchApp:
         if self._aggregator:
             return await self._aggregator.fetch_weather_now()
         return False
+
+    def _on_peer_watchdog_event(
+        self, name: str, online: bool, last_seen: Optional[datetime],
+    ) -> None:
+        """Watchdog state transition callback. Scheduled from RemotePoller."""
+        asyncio.create_task(self._send_peer_alert(name, online, last_seen))
+
+    async def _send_peer_alert(
+        self, name: str, online: bool, last_seen: Optional[datetime],
+    ) -> None:
+        """Emit a peer offline/recovery alert to Telegram and TUI."""
+        from .formatting import format_age_long
+
+        if online:
+            text = t("tg_peer_recovered", name=name)
+        else:
+            if last_seen:
+                age = format_age_long((datetime.now() - last_seen).total_seconds())
+            else:
+                age = t("common_no_data")
+            text = t("tg_peer_offline", name=name, age=age)
+
+        if self._bot:
+            try:
+                await self._bot.send_message(text)
+            except Exception as e:
+                logger.error("Failed to send peer alert to Telegram: %s", e)
+
+        logger.info("Peer alert: %s", text)
 
     async def _emit_alerts(self, events: list) -> None:
         """Route alert events to the active UI."""

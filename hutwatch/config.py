@@ -76,6 +76,23 @@ def load_config(config_path: Path) -> AppConfig:
             logger.warning("Invalid api_port value: %s", api_port)
             api_port = None
 
+    api_bind = str(data.get("api_bind", "0.0.0.0"))
+    api_token = data.get("api_token")
+    if api_token is not None:
+        api_token = str(api_token)
+
+    watchdog_data = data.get("peer_watchdog") or {}
+    try:
+        peer_watchdog_threshold = int(watchdog_data.get("threshold_seconds", 900))
+    except (ValueError, TypeError):
+        logger.warning("Invalid peer_watchdog.threshold_seconds; using default")
+        peer_watchdog_threshold = 900
+    try:
+        peer_watchdog_interval = int(watchdog_data.get("check_interval_seconds", 60))
+    except (ValueError, TypeError):
+        logger.warning("Invalid peer_watchdog.check_interval_seconds; using default")
+        peer_watchdog_interval = 60
+
     remote_sites = []
     for site_data in data.get("remote_sites", []):
         try:
@@ -83,6 +100,7 @@ def load_config(config_path: Path) -> AppConfig:
                 name=site_data["name"],
                 url=site_data["url"].rstrip("/"),
                 poll_interval=int(site_data.get("poll_interval", 30)),
+                token=site_data.get("token"),
             )
             remote_sites.append(site)
             logger.debug("Loaded remote site: %s (%s)", site.name, site.url)
@@ -96,6 +114,7 @@ def load_config(config_path: Path) -> AppConfig:
                 name=peer_data["name"],
                 url=peer_data["url"].rstrip("/"),
                 poll_interval=int(peer_data.get("poll_interval", 30)),
+                token=peer_data.get("token"),
             )
             peers.append(peer)
             logger.debug("Loaded peer: %s (%s)", peer.name, peer.url)
@@ -108,6 +127,10 @@ def load_config(config_path: Path) -> AppConfig:
         weather=weather_config,
         language=language,
         api_port=api_port,
+        api_bind=api_bind,
+        api_token=api_token,
+        peer_watchdog_threshold=peer_watchdog_threshold,
+        peer_watchdog_interval=peer_watchdog_interval,
         remote_sites=remote_sites,
         peers=peers,
     )

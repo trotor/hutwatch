@@ -86,6 +86,7 @@ class RemoteSiteConfig:
     name: str
     url: str
     poll_interval: int = 30
+    token: Optional[str] = None
 
 
 @dataclass
@@ -97,6 +98,10 @@ class AppConfig:
     weather: Optional[WeatherConfig] = None
     language: str = "fi"
     api_port: Optional[int] = None
+    api_bind: str = "0.0.0.0"
+    api_token: Optional[str] = None
+    peer_watchdog_threshold: int = 900
+    peer_watchdog_interval: int = 60
     remote_sites: list[RemoteSiteConfig] = field(default_factory=list)
     peers: list[RemoteSiteConfig] = field(default_factory=list)
 

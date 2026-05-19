@@ -267,6 +267,56 @@ remote_sites:
 
 TUI-dashboard ja konsolituloste näyttävät etäkohteiden anturit ja sään paikallisten tietojen rinnalla. API-portin voi asettaa myös `--api-port`-lipulla komentorivillä.
 
+### Keskuspää-tila (hub mode)
+
+Useamman mökin asetelmassa yksi keskusinstanssi (esim. kotipalvelin nginxin takana) voi kerätä datan kaikilta mökeiltä ja lähettää Telegram-hälytykset niiden puolesta. Tämä koostuu kolmesta osasta:
+
+1. **Jaettu token-autentikointi** `POST /api/v1/sync` -rajapinnassa, jotta endpointin voi turvallisesti avata julkiseen internetiin.
+2. **Säädettävä bind-osoite**, jolloin API kuuntelee vain localhostia kun edessä on nginx.
+3. **Peer-watchdog**, joka lähettää Telegram-hälytyksen kun mökki ei ole synkannut määräaikana (esim. sähkö- tai verkkokatko), ja toisen hälytyksen kun mökki palaa.
+
+**Keskuspään** `config.yaml`:
+
+```yaml
+telegram:
+  token: "your-bot-token"
+  chat_id: 123456789
+
+api_port: 8099
+api_bind: 127.0.0.1                  # vain nginx ottaa yhteyttä
+api_token: "pitkä-satunnainen-merkkijono"
+
+peer_watchdog:
+  threshold_seconds: 900             # 15 minuuttia
+  check_interval_seconds: 60
+```
+
+**Mökkilaitteen** `config.yaml`:
+
+```yaml
+sensors: []
+
+peers:
+  - name: "Keskus"
+    url: "https://hutwatch.example.com"
+    poll_interval: 60
+    token: "pitkä-satunnainen-merkkijono"  # sama kuin keskuspään api_token
+```
+
+**nginx-konfig** keskuspäässä:
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8099/api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_real_ip;
+    proxy_set_header X-HutWatch-Token $http_x_hutwatch_token;
+    client_max_body_size 2m;
+}
+```
+
+Kun mökki lakkaa pushaamasta dataa yli `threshold_seconds` ajan, keskuspää lähettää Telegram-hälytyksen. Palautumishälytys lähtee kun mökki taas synkkaa. Mökkilaite voi yhä ajaa omaa TUI:ta tai konsolia paikallisesti eikä tarvitse enää omaa Telegram-bottiaan.
+
 ## macOS: taustapalvelu ja työpöytäwidget
 
 ### Taustaajo launchd:llä

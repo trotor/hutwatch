@@ -37,13 +37,34 @@ sensors: []
 # Exposes sensor data as JSON on the given port.
 # api_port: 8099
 
+# Bind address for the API server (optional, default 0.0.0.0)
+# Set to 127.0.0.1 when running behind nginx reverse proxy on the same host
+# so the port isn't exposed to the network directly.
+# api_bind: 127.0.0.1
+
+# Shared token required in the X-HutWatch-Token header for POST /api/v1/sync.
+# When set, unauthenticated sync requests get 401. Recommended whenever the
+# API is reachable from the public internet (e.g. via nginx). Use the same
+# value in peers[].token on the client side.
+# api_token: "change-me-to-a-long-random-string"
+
+# Peer watchdog (optional, central hub mode)
+# Monitors when peers stop syncing — useful for detecting power/network outages.
+# Sends a Telegram alert when a peer hasn't synced for threshold_seconds and
+# another alert when it recovers. Set threshold_seconds: 0 to disable.
+# peer_watchdog:
+#   threshold_seconds: 900       # 15 minutes
+#   check_interval_seconds: 60
+
 # Bidirectional peer sync (optional, recommended)
 # Sends your data to the peer and receives theirs — both sides see everything.
 # The peer only needs api_port enabled, no peers: config needed on that end.
+# Set token to match the peer's api_token if the peer requires authentication.
 # peers:
 #   - name: "Cabin"
 #     url: "http://100.64.0.2:8099"
 #     poll_interval: 30
+#     # token: "must-match-peer-api_token"
 
 # Read-only remote sites (optional, legacy)
 # One-way monitoring: fetches data but doesn't share yours.
@@ -51,3 +72,4 @@ sensors: []
 #   - name: "Cabin"
 #     url: "http://100.64.0.2:8099"
 #     poll_interval: 30
+#     # token: "must-match-remote-api_token"

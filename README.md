@@ -267,6 +267,56 @@ remote_sites:
 
 The TUI dashboard and console output show remote site sensors and weather alongside local data. The API port can also be set via the `--api-port` CLI flag.
 
+### Centralized Hub Mode
+
+For multi-site setups where one central instance (e.g. a home server behind nginx) collects data from several remote sites and sends Telegram alerts on their behalf, HutWatch supports a "hub mode" with three pieces:
+
+1. **Shared token authentication** on `POST /api/v1/sync` so the endpoint can be safely exposed to the public internet.
+2. **Configurable bind address** so the API server can listen only on localhost when fronted by nginx.
+3. **Peer watchdog** that alerts to Telegram when a remote site hasn't synced within a threshold (e.g. power outage or network drop) and again when it recovers.
+
+**Hub** (central server) `config.yaml`:
+
+```yaml
+telegram:
+  token: "your-bot-token"
+  chat_id: 123456789
+
+api_port: 8099
+api_bind: 127.0.0.1                  # only nginx talks to it
+api_token: "long-random-string"      # required for incoming sync
+
+peer_watchdog:
+  threshold_seconds: 900             # 15 minutes
+  check_interval_seconds: 60
+```
+
+**Cabin / remote client** `config.yaml`:
+
+```yaml
+sensors: []
+
+peers:
+  - name: "Hub"
+    url: "https://hutwatch.example.com"
+    poll_interval: 60
+    token: "long-random-string"      # must match hub's api_token
+```
+
+**nginx snippet** on the hub:
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8099/api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_real_ip;
+    proxy_set_header X-HutWatch-Token $http_x_hutwatch_token;
+    client_max_body_size 2m;
+}
+```
+
+When a cabin stops pushing for longer than `threshold_seconds`, the hub sends a Telegram alert. A recovery alert follows when the cabin resumes. Each cabin can still run its own TUI/console locally and no longer needs its own Telegram bot.
+
 ## macOS: Background Service and Desktop Widget
 
 ### Background Service with launchd

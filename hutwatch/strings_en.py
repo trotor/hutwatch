@@ -202,6 +202,10 @@ STRINGS: dict = {
     # ── Telegram: shutdown ────────────────────────────────────────────
     "tg_shutdown_message": "🔴 *HutWatch shutting down*",
 
+    # ── Telegram: peer watchdog ───────────────────────────────────────
+    "tg_peer_offline": "⚠️ *{name}* offline — last seen {age}",
+    "tg_peer_recovered": "✅ *{name}* back online",
+
     # ── Scheduler ─────────────────────────────────────────────────────
     "scheduler_report_header": "📊 *Temperature Report* ({timestamp})\n",
 

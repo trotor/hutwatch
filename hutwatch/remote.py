@@ -114,12 +114,19 @@ class RemotePoller:
         peers: Optional[list[RemoteSiteConfig]] = None,
         db=None,
         local_status_fn: Optional[Callable[[], dict]] = None,
+        watchdog_threshold: int = 900,
+        watchdog_interval: int = 60,
+        watchdog_callback: Optional[Callable[[str, bool, Optional[datetime]], None]] = None,
     ) -> None:
         self._remote_sites = remote_sites or []
         self._peers = peers or []
         self._db = db
         self._local_status_fn = local_status_fn
+        self._watchdog_threshold = watchdog_threshold
+        self._watchdog_interval = watchdog_interval
+        self._watchdog_callback = watchdog_callback
         self._data: dict[str, RemoteSiteData] = {}
+        self._offline_alerted: set[str] = set()
         self._session: Optional[aiohttp.ClientSession] = None
         self._tasks: list[asyncio.Task] = []
 
@@ -233,6 +240,13 @@ class RemotePoller:
             )
             self._tasks.append(task)
 
+        # Start watchdog task if configured
+        if self._watchdog_threshold > 0 and self._watchdog_interval > 0:
+            self._tasks.append(asyncio.create_task(
+                self._watchdog_loop(),
+                name="peer_watchdog",
+            ))
+
         total = len(self._remote_sites) + len(self._peers)
         if total > 0:
             logger.info(
@@ -265,11 +279,48 @@ class RemotePoller:
                 await self._fetch_site(site)
             await asyncio.sleep(site.poll_interval)
 
+    async def _watchdog_loop(self) -> None:
+        """Periodically check peer freshness and emit offline/recovery events."""
+        # Brief grace period after startup so peers have a chance to sync first
+        await asyncio.sleep(min(self._watchdog_interval, 30))
+        while True:
+            try:
+                self._check_freshness()
+            except Exception as e:
+                logger.warning("Watchdog check failed: %s", e)
+            await asyncio.sleep(self._watchdog_interval)
+
+    def _check_freshness(self) -> None:
+        """Inspect each tracked site and fire callbacks on state transitions."""
+        if not self._watchdog_callback:
+            return
+        now = datetime.now()
+        for name, site_data in self._data.items():
+            last = site_data.last_fetch
+            stale = last is None or (now - last).total_seconds() > self._watchdog_threshold
+            alerted = name in self._offline_alerted
+            if stale and not alerted:
+                self._offline_alerted.add(name)
+                site_data.online = False
+                logger.warning("Peer %s offline (last seen: %s)", name, last)
+                try:
+                    self._watchdog_callback(name, False, last)
+                except Exception as e:
+                    logger.error("Watchdog offline callback failed: %s", e)
+            elif not stale and alerted:
+                self._offline_alerted.discard(name)
+                logger.info("Peer %s recovered", name)
+                try:
+                    self._watchdog_callback(name, True, last)
+                except Exception as e:
+                    logger.error("Watchdog recovery callback failed: %s", e)
+
     async def _fetch_site(self, site: RemoteSiteConfig) -> None:
         """Fetch status from a remote site (read-only GET)."""
         url = f"{site.url}/api/v1/status"
+        headers = {"X-HutWatch-Token": site.token} if site.token else None
         try:
-            async with self._session.get(url) as resp:
+            async with self._session.get(url, headers=headers) as resp:
                 if resp.status != 200:
                     self._data[site.name].online = False
                     self._data[site.name].last_error = f"HTTP {resp.status}"
@@ -300,9 +351,10 @@ class RemotePoller:
         """
         url = f"{site.url}/api/v1/sync"
         local_data = self._local_status_fn() if self._local_status_fn else {}
+        headers = {"X-HutWatch-Token": site.token} if site.token else None
 
         try:
-            async with self._session.post(url, json=local_data) as resp:
+            async with self._session.post(url, json=local_data, headers=headers) as resp:
                 if resp.status == 404:
                     # Peer doesn't support sync yet — fall back to GET
                     logger.info("Peer %s doesn't support sync, falling back to GET", site.name)

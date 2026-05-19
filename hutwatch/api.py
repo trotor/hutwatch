@@ -99,12 +99,16 @@ class ApiServer:
         db: Database,
         weather: Optional[WeatherFetcher],
         port: int,
+        bind: str = "0.0.0.0",
+        token: Optional[str] = None,
     ) -> None:
         self._config = config
         self._store = store
         self._db = db
         self._weather = weather
         self._port = port
+        self._bind = bind
+        self._token = token
         self._runner: Optional[web.AppRunner] = None
         self._remote: Optional[RemotePoller] = None
 
@@ -125,9 +129,10 @@ class ApiServer:
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, "0.0.0.0", self._port)
+        site = web.TCPSite(self._runner, self._bind, self._port)
         await site.start()
-        logger.info("API server started on port %d", self._port)
+        auth_state = "with token auth" if self._token else "without auth"
+        logger.info("API server started on %s:%d (%s)", self._bind, self._port, auth_state)
 
     async def stop(self) -> None:
         """Stop the API server."""
@@ -150,6 +155,13 @@ class ApiServer:
 
         The peer POSTs its local status; we store it and return ours.
         """
+        if self._token:
+            provided = request.headers.get("X-HutWatch-Token", "")
+            if provided != self._token:
+                logger.warning("Sync request rejected: invalid token from %s",
+                               request.remote)
+                return web.json_response({"error": "unauthorized"}, status=401)
+
         try:
             peer_data = await request.json()
         except Exception:

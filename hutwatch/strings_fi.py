@@ -200,6 +200,10 @@ STRINGS: dict = {
     # ── Telegram: shutdown ────────────────────────────────────────────
     "tg_shutdown_message": "🔴 *HutWatch pysähtyy*",
 
+    # ── Telegram: peer watchdog ───────────────────────────────────────
+    "tg_peer_offline": "⚠️ *{name}* offline — viimeksi nähty {age}",
+    "tg_peer_recovered": "✅ *{name}* takaisin verkossa",
+
     # ── Scheduler ─────────────────────────────────────────────────────
     "scheduler_report_header": "📊 *Lämpötilaraportti* ({timestamp})\n",
 
