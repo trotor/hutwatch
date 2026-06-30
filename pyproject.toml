@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-telegram = ["python-telegram-bot[job-queue]>=20.0"]
+telegram = [
+    "python-telegram-bot[job-queue]>=20.0",
+    "matplotlib>=3.7",
+]
 
 [project.scripts]
 hutwatch = "hutwatch.__main__:main"

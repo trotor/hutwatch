@@ -183,6 +183,15 @@ class Aggregator:
                 temp_max,
             )
 
+        # Flush buffered remote readings into the same 5-min bucket
+        if self._remote is not None:
+            try:
+                n = self._remote.flush_readings_to_db(timestamp)
+                if n:
+                    logger.debug("Flushed %d remote sensor aggregates", n)
+            except Exception as e:
+                logger.warning("Failed to flush remote readings: %s", e)
+
         # Check alert thresholds
         if self._alert_manager and self._alert_callback:
             try:

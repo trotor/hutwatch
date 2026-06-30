@@ -129,6 +129,8 @@ class RemotePoller:
         self._offline_alerted: set[str] = set()
         self._session: Optional[aiohttp.ClientSession] = None
         self._tasks: list[asyncio.Task] = []
+        # Buffer of remote sensor samples awaiting 5-min aggregation, keyed by MAC.
+        self._reading_buffer: dict[str, list[dict]] = {}
 
         # Initialize data entries for configured sites/peers
         for site in self._remote_sites + self._peers:
@@ -161,6 +163,7 @@ class RemotePoller:
             self._data[site_name] = site_data
             self._save_cache_to_db(site_name)
             self._sync_remote_devices(site_name, data.get("sensors", []))
+            self._buffer_sensor_readings(site_data)
             logger.debug("Stored incoming peer data: %s (%d sensors)",
                          site_name, len(site_data.sensors))
         except Exception as e:
@@ -199,6 +202,57 @@ class RemotePoller:
         """Sync remote device names into devices table."""
         if self._db and hasattr(self._db, "sync_remote_devices"):
             self._db.sync_remote_devices(site_name, sensors)
+
+    def _buffer_sensor_readings(self, site_data: RemoteSiteData) -> None:
+        """Append the latest snapshot of each remote sensor to the aggregation buffer."""
+        now = datetime.now()
+        for s in site_data.sensors:
+            if s.temperature is None or not s.mac:
+                continue
+            mac = s.mac.upper()
+            self._reading_buffer.setdefault(mac, []).append({
+                "ts": now,
+                "temperature": s.temperature,
+                "humidity": s.humidity,
+                "battery_voltage": s.battery_voltage,
+                "battery_percent": s.battery_percent,
+            })
+
+    def flush_readings_to_db(self, bucket_ts: datetime) -> int:
+        """Aggregate buffered remote samples and write one row per MAC.
+
+        Called by the local Aggregator on its 5-min tick so remote readings
+        land in the same bucket boundary as local sensors.
+        """
+        if not self._db or not self._reading_buffer:
+            return 0
+
+        saved = 0
+        for mac, samples in self._reading_buffer.items():
+            if not samples:
+                continue
+            temps = [s["temperature"] for s in samples]
+            humidities = [s["humidity"] for s in samples if s["humidity"] is not None]
+            latest = samples[-1]
+            try:
+                self._db.save_aggregated_reading(
+                    mac=mac,
+                    timestamp=bucket_ts,
+                    temp_avg=sum(temps) / len(temps),
+                    temp_min=min(temps),
+                    temp_max=max(temps),
+                    humidity_avg=(sum(humidities) / len(humidities)) if humidities else None,
+                    pressure_avg=None,
+                    battery_voltage=latest["battery_voltage"],
+                    battery_percent=latest["battery_percent"],
+                    sample_count=len(samples),
+                )
+                saved += 1
+            except Exception as e:
+                logger.warning("Failed to save remote readings for %s: %s", mac, e)
+
+        self._reading_buffer.clear()
+        return saved
 
     def _save_cache_to_db(self, site_name: str) -> None:
         """Save remote site data to database settings table."""
@@ -332,6 +386,7 @@ class RemotePoller:
             self._data[site.name] = _parse_site_data(data, site.name)
             self._save_cache_to_db(site.name)
             self._sync_remote_devices(site.name, data.get("sensors", []))
+            self._buffer_sensor_readings(self._data[site.name])
             logger.debug("Fetched remote site %s: %d sensors",
                          site.name, len(self._data[site.name].sensors))
 
@@ -372,6 +427,7 @@ class RemotePoller:
             self._data[site.name] = _parse_site_data(data, site.name)
             self._save_cache_to_db(site.name)
             self._sync_remote_devices(site.name, data.get("sensors", []))
+            self._buffer_sensor_readings(self._data[site.name])
             logger.debug("Synced with peer %s: %d sensors",
                          site.name, len(self._data[site.name].sensors))
 
