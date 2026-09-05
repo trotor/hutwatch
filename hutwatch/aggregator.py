@@ -227,7 +227,12 @@ class Aggregator:
             now - self._start_time >= timedelta(seconds=SILENCE_GRACE_SECONDS)
         )
 
+        # Local devices plus every peer's — get_all_devices() returns only
+        # site IS NULL rows, and peer sensors need watching just as much
         devices = self._db.get_all_devices(include_hidden=True)
+        if self._remote:
+            for site_name in self._remote.get_all_site_data():
+                devices.extend(self._db.get_all_devices(site=site_name))
         device_map = {d.mac: d for d in devices}
         battery_units: dict[str, str] = {}
         auto_eligible: set[str] = set()
