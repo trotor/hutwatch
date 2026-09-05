@@ -220,6 +220,44 @@ sudo journalctl -u hutwatch -f
 | `/rename 1 Living room` | Rename device 1 |
 | `/report on/off` | Toggle scheduled reports |
 
+## Alerts
+
+HutWatch warns about three things: temperature crossing a limit you set, a battery running low, and a device that has stopped reporting.
+
+| Command | Description |
+|---------|-------------|
+| `/alert` | List all alerts |
+| `/alert 1 low -5` | Warn when device 1 drops below −5 °C |
+| `/alert 1 high 30` | Warn when device 1 rises above 30 °C |
+| `/alert 1 batt 2.4` | Battery limit (volts or percent, matching what the sensor reports) |
+| `/alert 1 silent 24` | Warn when device 1 hasn't reported for 24 h |
+| `/alert 1 batt off` | Disable one alert |
+| `/alert 1 recovery on` | Also notify when the temperature returns to normal |
+
+The same commands work in the TUI as `a 1 batt 2.4`, and remote sensors are addressed as `r1`, `r2`.
+
+**Battery and silence alerts are automatic.** Rules are created for every device that reports data, using the thresholds in the `device_watchdog` config block, so you don't have to set them up per sensor. Setting a threshold by hand pins it — later changes to the config default won't move it.
+
+Both repeat every `remind_days` (7 by default) for as long as the condition lasts, so a battery you meant to replace keeps reminding you, and both send a recovery message when the battery is changed or the device comes back.
+
+Two guards keep them quiet when they should be:
+
+- **Frost.** Coin-cell voltage sags in the cold and recovers when the sensor warms. Battery alerts are skipped while a sensor reads below `cold_grace_temp` (−15 °C by default), so a cold night doesn't look like a dying cell.
+- **Startup and stale devices.** Silence alerts wait 15 minutes after startup for Bluetooth to hear the sensors, and devices that have already been quiet for over a week get no new rules — a sensor that vanished months ago is not news.
+
+Configure the defaults in `config.yaml`:
+
+```yaml
+device_watchdog:
+  battery_voltage_low: 2.5   # V, for sensors reporting voltage (Ruuvi CR2477)
+  battery_percent_low: 15    # %, for sensors reporting percent (Xiaomi ATC/PVVX)
+  silent_hours: 12
+  cold_grace_temp: -15
+  remind_days: 7
+```
+
+Set any threshold to `0` to disable that check.
+
 ## Interactive Menu
 
 The `/menu` or `/start` command opens an interactive menu with inline buttons:

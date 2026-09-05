@@ -10,13 +10,17 @@ from typing import TYPE_CHECKING, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..alerts import AUTO_TYPES
 from ..ble.sensor_store import SensorStore
 from ..formatting import (
+    alert_type_label,
     build_remote_device_list,
     create_ascii_graph,
     format_age_long,
+    format_alert_value,
     format_uptime,
     parse_time_arg,
+    resolve_alert_type,
     resolve_device,
 )
 from ..i18n import t, wind_direction_text
@@ -285,6 +289,7 @@ class CommandHandlers:
                         info += f", {reading.battery_voltage:.2f}V"
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
+                    info += self._alert_indicators(device.mac)
 
                     lines.append(f"  {status_emoji} {device.display_order}. {name}: {info}")
                 else:
@@ -1588,24 +1593,22 @@ class CommandHandlers:
             return
 
         # Validate alert type
-        if alert_type_str == "low":
-            alert_type = "temp_low"
-            type_label = t("alert_temp_low")
-        elif alert_type_str == "high":
-            alert_type = "temp_high"
-            type_label = t("alert_temp_high")
-        else:
+        resolved = resolve_alert_type(alert_type_str)
+        if not resolved:
             await update.effective_message.reply_text(
                 t("tg_alert_usage"),
                 parse_mode="Markdown",
             )
             return
 
-        # Handle "off" → remove alert
+        alert_type, type_label = resolved
+
+        # Handle "off" → remove or disable the alert
         if value_str.lower() == "off":
             if self._alert_manager.remove_alert(device.mac, alert_type):
+                key = "alert_disabled" if alert_type in AUTO_TYPES else "alert_removed"
                 await update.effective_message.reply_text(
-                    t("alert_removed", name=name, type=type_label),
+                    t(key, name=name, type=type_label),
                     parse_mode="Markdown",
                 )
             else:
@@ -1625,12 +1628,64 @@ class CommandHandlers:
             )
             return
 
+        unit = self._alert_unit(device.mac, alert_type)
+        if unit is None:
+            await update.effective_message.reply_text(
+                t("alert_battery_unknown", name=name),
+                parse_mode="Markdown",
+            )
+            return
+
         # Set alert
-        self._alert_manager.set_alert(device.mac, alert_type, threshold)
+        self._alert_manager.set_alert(device.mac, alert_type, threshold, unit=unit)
         await update.effective_message.reply_text(
-            t("alert_set_success", name=name, type=type_label, threshold=threshold),
+            t(
+                "alert_set_success",
+                name=name,
+                type=type_label,
+                threshold=format_alert_value(threshold, unit),
+            ),
             parse_mode="Markdown",
         )
+
+    def _alert_indicators(self, mac: str) -> str:
+        """Status markers for a device's currently triggered alerts."""
+        if not self._alert_manager:
+            return ""
+
+        markers: list[str] = []
+        for alert in self._alert_manager.get_alerts(mac):
+            if not alert.enabled or not alert.triggered:
+                continue
+            if alert.alert_type == "batt_low":
+                markers.append(t("alert_battery_indicator"))
+            elif alert.alert_type == "silent":
+                markers.append(t("alert_silent_indicator"))
+        return (" " + " ".join(markers)) if markers else ""
+
+    def _alert_unit(self, mac: str, alert_type: str) -> Optional[str]:
+        """Resolve the unit for a new alert rule, or None if undeterminable."""
+        if alert_type == "silent":
+            return "h"
+        if alert_type != "batt_low":
+            return "C"
+
+        reading = self._store.get_latest(mac) if self._store else None
+        if reading is not None:
+            if reading.battery_voltage is not None:
+                return "V"
+            if reading.battery_percent is not None:
+                return "%"
+
+        stored = self._db.get_latest_battery(mac) if self._db else None
+        if stored:
+            return stored[1]
+
+        # Keep an existing rule's unit when the sensor is currently quiet
+        for rule in self._alert_manager.get_alerts(mac):
+            if rule.alert_type == "batt_low":
+                return rule.unit
+        return None
 
     async def _alert_list(self, update: Update) -> None:
         """List all configured alerts and available devices."""
@@ -1654,20 +1709,22 @@ class CommandHandlers:
                     name = alert.mac
                     order = 0
 
-                type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+                type_label = alert_type_label(alert.alert_type)
                 if not alert.enabled:
                     status = t("alert_status_disabled")
                 elif alert.triggered:
                     status = t("alert_status_triggered")
                 else:
                     status = t("alert_status_ok")
+                if alert.auto:
+                    status += f" _{t('alert_auto_marker')}_"
 
                 lines.append(t(
                     "alert_list_item",
                     order=order,
                     name=name,
                     type=type_label,
-                    threshold=alert.threshold,
+                    threshold=format_alert_value(alert.threshold, alert.unit),
                     status=status,
                 ))
         else:

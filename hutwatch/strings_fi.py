@@ -337,30 +337,46 @@ STRINGS: dict = {
     "alert_direction_above": "ylittää",
     "alert_none": "Ei hälytyksiä asetettu",
     "alert_list_header": "🔔 *Hälytykset*\n",
-    "alert_list_item": "{order}. *{name}*: {type} {threshold:.1f}°C {status}",
+    "alert_list_item": "{order}. *{name}*: {type} {threshold} {status}",
     "alert_status_ok": "✅",
     "alert_status_triggered": "⚠️",
     "alert_status_disabled": "⏸",
-    "alert_set_success": "✅ Hälytys asetettu: *{name}* {type} {threshold:.1f}°C",
+    "alert_set_success": "✅ Hälytys asetettu: *{name}* {type} {threshold}",
     "alert_removed": "✅ Hälytys poistettu: *{name}* {type}",
+    "alert_disabled": "✅ Hälytys pois käytöstä: *{name}* {type}",
     "alert_not_found": "Hälytystä ei löytynyt: {name} {type}",
     "alert_recovery_on": "✅ Palautumisilmoitus päällä: *{name}* {type}",
     "alert_recovery_off": "✅ Palautumisilmoitus pois: *{name}* {type}",
+    # Battery and silence alerts
+    "alert_type_batt_low": "paristo",
+    "alert_type_silent": "hiljaisuus",
+    "alert_battery_low": "🪫 *{name}*: Paristo vähissä ({value}, raja {threshold})",
+    "alert_battery_reminder": "🪫 *{name}*: Paristo edelleen vähissä ({value}) — muistutus",
+    "alert_battery_recovery": "🔋 *{name}*: Paristo taas kunnossa ({value})",
+    "alert_silent": "🔇 *{name}*: Ei vastannut {value} (raja {threshold})",
+    "alert_silent_reminder": "🔇 *{name}*: Edelleen hiljaa, {value} viimeisestä lukemasta — muistutus",
+    "alert_silent_recovery": "🔊 *{name}*: Laite vastaa taas",
+    "alert_auto_marker": "auto",
+    "alert_battery_indicator": "🪫",
+    "alert_silent_indicator": "🔇",
+    "alert_battery_unknown": "Laite ei raportoi paristotietoa: {name}",
     "tg_alert_usage": (
         "Käyttö:\n"
         "`/alert` - näytä hälytykset\n"
-        "`/alert <laite> low <arvo>` - aseta alaraja\n"
-        "`/alert <laite> high <arvo>` - aseta yläraja\n"
-        "`/alert <laite> low off` - poista alaraja\n"
-        "`/alert <laite> high off` - poista yläraja\n"
+        "`/alert <laite> low <arvo>` - aseta lämpötilan alaraja\n"
+        "`/alert <laite> high <arvo>` - aseta lämpötilan yläraja\n"
+        "`/alert <laite> batt <arvo>` - paristoraja (V tai %)\n"
+        "`/alert <laite> silent <tunnit>` - hiljaisuusraja\n"
+        "`/alert <laite> low|high|batt|silent off` - poista käytöstä\n"
         "`/alert <laite> recovery on/off` - palautumisilmoitus\n"
+        "Paristo- ja hiljaisuusrajat syntyvät automaattisesti asetuksista.\n"
         "Etäanturit: `r1`, `r2` jne."
     ),
     "alert_available_devices": "*Laitteet:*",
     "alert_device_local": "{order}. {name}",
     "alert_device_remote": "{r_id}. ↗ {site} / {name}  (`{mac}`)",
     "tui_cmd_alert": "[a] hälytykset",
-    "tui_alert_usage": "Käyttö: a <nro/r1> low/high <arvo>  tai  a <nro/r1> low/high off",
+    "tui_alert_usage": "Käyttö: a <nro/r1> low|high|batt|silent <arvo>  tai  ... off",
     "tui_alert_cursor_hint": "↑↓ valitse laite  Enter valitse  Esc peruuta  q lopeta",
     "tui_alert_indicator": "⚠",
 }

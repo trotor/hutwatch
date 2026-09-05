@@ -220,6 +220,44 @@ sudo journalctl -u hutwatch -f
 | `/rename 1 Olohuone` | Nimeä laite 1 uudelleen |
 | `/report on/off` | Ajastetut raportit päälle/pois |
 
+## Hälytykset
+
+HutWatch varoittaa kolmesta asiasta: lämpötila ylittää tai alittaa asettamasi rajan, paristo on vähissä, tai laite on lakannut vastaamasta.
+
+| Komento | Kuvaus |
+|---------|--------|
+| `/alert` | Listaa hälytykset |
+| `/alert 1 low -5` | Varoita kun laite 1 alittaa −5 °C |
+| `/alert 1 high 30` | Varoita kun laite 1 ylittää 30 °C |
+| `/alert 1 batt 2.4` | Paristoraja (voltteja tai prosentteja sen mukaan, kumpaa anturi raportoi) |
+| `/alert 1 silent 24` | Varoita kun laite 1 ei ole vastannut 24 tuntiin |
+| `/alert 1 batt off` | Poista yksi hälytys käytöstä |
+| `/alert 1 recovery on` | Ilmoita myös kun lämpötila palautuu normaaliksi |
+
+Samat komennot toimivat TUI:ssa muodossa `a 1 batt 2.4`, ja etäanturit osoitetaan tunnuksilla `r1`, `r2`.
+
+**Paristo- ja hiljaisuushälytykset syntyvät automaattisesti.** Säännöt luodaan jokaiselle dataa raportoivalle laitteelle `device_watchdog`-asetuslohkon kynnysarvoilla, joten mitään ei tarvitse asettaa anturikohtaisesti. Käsin asetettu kynnys jää voimaan — myöhemmät muutokset asetusten oletusarvoon eivät siirrä sitä.
+
+Molemmat toistuvat `remind_days` välein (oletuksena 7 vrk) niin kauan kuin tila jatkuu, joten vaihtamatta jäänyt paristo muistuttaa itsestään uudelleen. Molemmat lähettävät myös palautumisviestin kun paristo vaihdetaan tai laite palaa.
+
+Kaksi suojaa pitää ne hiljaa silloin kun pitääkin:
+
+- **Pakkanen.** Nappipariston jännite notkahtaa kylmässä ja palautuu anturin lämmetessä. Paristohälytykset ohitetaan kun anturi näyttää alle `cold_grace_temp` (oletuksena −15 °C), jottei pakkasyö näytä tyhjenevältä paristolta.
+- **Käynnistys ja vanhentuneet laitteet.** Hiljaisuushälytykset odottavat 15 minuuttia käynnistyksestä, jotta Bluetooth ehtii kuulla anturit, eivätkä yli viikon hiljaa olleet laitteet saa uusia sääntöjä — kuukausia sitten kadonnut anturi ei ole uutinen.
+
+Oletusarvot asetetaan `config.yaml`issa:
+
+```yaml
+device_watchdog:
+  battery_voltage_low: 2.5   # V, jännitettä raportoiville (Ruuvi CR2477)
+  battery_percent_low: 15    # %, prosentteja raportoiville (Xiaomi ATC/PVVX)
+  silent_hours: 12
+  cold_grace_temp: -15
+  remind_days: 7
+```
+
+Mikä tahansa kynnys arvolla `0` poistaa kyseisen tarkistuksen käytöstä.
+
 ## Interaktiivinen valikko
 
 Komento `/menu` tai `/start` avaa interaktiivisen valikon inline-napeilla:
