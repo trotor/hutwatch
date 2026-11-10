@@ -62,14 +62,16 @@ sensors: []
 #   threshold_seconds: 900       # 15 minutes
 #   check_interval_seconds: 60
 
-# Device watchdog (optional) — automatic battery and silence alerts.
+# Device watchdog (optional) — automatic silence alerts, plus opt-in battery
+# alerts. Low batteries are always shown as a UI marker (temperature-aware,
+# see README); Telegram battery alerts are off unless you set a threshold.
 # Rules are created for every device that reports data, so nothing needs to be
 # configured per sensor. Override a single device from the TUI (`a 1 batt 2.4`)
 # or Telegram (`/alert 1 batt 2.4`); `... off` disables it. Set any threshold
 # to 0 to turn that check off globally.
 # device_watchdog:
-#   battery_voltage_low: 2.5   # V, for sensors reporting voltage (Ruuvi CR2477)
-#   battery_percent_low: 15    # %, for sensors reporting percent (Xiaomi ATC/PVVX)
+#   battery_voltage_low: 0     # V, opt-in battery alerts (e.g. 2.4); 0 = off
+#   battery_percent_low: 0     # %, opt-in for sensors reporting percent; 0 = off
 #   silent_hours: 12           # alert when a device hasn't reported in this long
 #   cold_grace_temp: -15       # skip battery alerts below this — coin-cell voltage
 #                              # sags in frost and recovers when the sensor warms

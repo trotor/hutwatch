@@ -224,6 +224,8 @@ STRINGS: dict = {
     "tui_sensors_label": "Anturit:",
     "tui_sensors_not_configured": "ei konfiguroitu",
     "tui_battery": "akku",
+    "tui_battery_low_indicator": "akku!",
+    "tg_battery_low_indicator": "🪫",
     "tui_uptime_label": "Käynnissä:",
 
     # ── TUI: footer commands ──────────────────────────────────────────
@@ -325,6 +327,7 @@ STRINGS: dict = {
     "console_col_temp": "Lämpö",
     "console_col_humidity": "Kost.",
     "console_col_battery": "Akku",
+    "console_battery_low_note": "! = paristo vähissä",
     "console_col_age": "Ikä",
     "console_press_enter": "Paina Enter näyttääksesi lukemat, Ctrl+C lopettaaksesi",
 

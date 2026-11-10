@@ -236,7 +236,9 @@ HutWatch warns about three things: temperature crossing a limit you set, a batte
 
 The same commands work in the TUI as `a 1 batt 2.4`, and remote sensors are addressed as `r1`, `r2`.
 
-**Battery and silence alerts are automatic.** Rules are created for every device that reports data, using the thresholds in the `device_watchdog` config block, so you don't have to set them up per sensor. Setting a threshold by hand pins it — later changes to the config default won't move it.
+**Low batteries are shown as an indicator, not a notification.** A low cell gets a marker after its sensor line — `batt!` in the TUI, `!` in console output, 🪫 in Telegram listings — remote/peer sensors included. Coin-cell voltage swings with temperature, so the marker isn't based on the current reading: each 5-minute sample over the last 72 h is compared against a temperature-dependent limit (Ruuvi Station's: 2.5 V at ≥ 0 °C, 2.3 V at −20…0 °C, 2.0 V below −20 °C), and the battery is flagged only if it never reached its limit in that window. Cold nights and long frosts don't trigger it, and it clears only once the cell is 0.1 V above its limit.
+
+**Silence alerts are automatic** (battery alerts too, if you opt in by setting `battery_voltage_low` / `battery_percent_low` — they are `0`, i.e. off, by default). Rules are created for every device that reports data, using the thresholds in the `device_watchdog` config block, so you don't have to set them up per sensor. Setting a threshold by hand pins it — later changes to the config default won't move it.
 
 Both repeat every `remind_days` (7 by default) for as long as the condition lasts, so a battery you meant to replace keeps reminding you, and both send a recovery message when the battery is changed or the device comes back.
 
@@ -249,8 +251,8 @@ Configure the defaults in `config.yaml`:
 
 ```yaml
 device_watchdog:
-  battery_voltage_low: 2.5   # V, for sensors reporting voltage (Ruuvi CR2477)
-  battery_percent_low: 15    # %, for sensors reporting percent (Xiaomi ATC/PVVX)
+  battery_voltage_low: 0     # V, opt-in battery alerts (e.g. 2.4); 0 = indicator only
+  battery_percent_low: 0     # %, opt-in for sensors reporting percent; 0 = off
   silent_hours: 12
   cold_grace_temp: -15
   remind_days: 7

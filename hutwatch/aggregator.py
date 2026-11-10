@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from .alerts import AlertManager
+from .battery import update_battery_states
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .models import AppConfig
@@ -120,6 +121,9 @@ class Aggregator:
 
     async def _run(self) -> None:
         """Main aggregation loop."""
+        # Evaluate battery state from stored history right away
+        self._update_battery_states()
+
         while self._running:
             try:
                 await asyncio.sleep(AGGREGATION_INTERVAL)
@@ -204,6 +208,8 @@ class Aggregator:
                     logger.debug("Flushed %d remote sensor aggregates", n)
             except Exception as e:
                 logger.warning("Failed to flush remote readings: %s", e)
+
+        self._update_battery_states()
 
         # Check alert thresholds
         if self._alert_manager and self._alert_callback:
@@ -348,6 +354,19 @@ class Aggregator:
         if stored:
             return stored
         return None
+
+    def _update_battery_states(self) -> None:
+        """Recompute low-battery flags for local and remote/peer sensors.
+
+        Remote readings are flushed into the local readings table, so their
+        battery history is evaluated here too — older peers don't send a
+        battery_low flag of their own.
+        """
+        macs = [s.mac for s in self._config.sensors]
+        if self._remote:
+            for site_data in self._remote.get_all_site_data().values():
+                macs.extend(s.mac.upper() for s in site_data.sensors if s.mac)
+        update_battery_states(self._store, self._db, macs)
 
     async def _run_weather(self) -> None:
         """Weather fetch loop."""

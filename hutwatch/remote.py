@@ -28,6 +28,7 @@ class RemoteSensor:
     humidity: Optional[float] = None
     battery_percent: Optional[int] = None
     battery_voltage: Optional[float] = None
+    battery_low: Optional[bool] = None
     timestamp: Optional[str] = None
     age_seconds: Optional[int] = None
 
@@ -72,6 +73,7 @@ def _parse_site_data(data: dict, site_name: str) -> RemoteSiteData:
             humidity=s.get("humidity"),
             battery_percent=s.get("battery_percent"),
             battery_voltage=s.get("battery_voltage"),
+            battery_low=s.get("battery_low"),
             timestamp=s.get("timestamp"),
             age_seconds=s.get("age_seconds"),
         ))

@@ -238,6 +238,29 @@ class Database:
 
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_battery_samples(
+        self,
+        mac: str,
+        hours: int,
+    ) -> list[tuple[datetime, Optional[float], Optional[float]]]:
+        """Get (timestamp, battery_voltage, temp_avg) rows for battery evaluation."""
+        if not self._conn:
+            return []
+
+        cutoff = compute_cutoff(hours, None)
+        cursor = self._conn.execute(
+            """
+            SELECT timestamp, battery_voltage, temp_avg
+            FROM readings
+            WHERE mac = ? AND timestamp >= ? AND battery_voltage IS NOT NULL
+            """,
+            (mac.upper(), cutoff.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        return [
+            (datetime.fromisoformat(row["timestamp"]), row["battery_voltage"], row["temp_avg"])
+            for row in cursor.fetchall()
+        ]
+
     def get_stats(
         self,
         mac: str,
@@ -515,6 +538,23 @@ class Database:
             self._conn.commit()
         except Exception as e:
             logger.error("Error setting alert: %s", e)
+
+    def remove_auto_alert(self, mac: str, alert_type: str) -> bool:
+        """Delete an auto-provisioned rule; rules the user has edited are kept."""
+        if not self._conn:
+            return False
+        try:
+            cursor = self._conn.execute(
+                "DELETE FROM alerts WHERE mac = ? AND alert_type = ? AND auto = 1",
+                (mac.upper(), alert_type),
+            )
+            self._conn.commit()
+            if cursor.rowcount:
+                logger.info("Removed auto %s alert for %s", alert_type, mac)
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing auto alert: %s", e)
+            return False
 
     def ensure_alert_default(
         self, mac: str, alert_type: str, threshold: float, unit: str,

@@ -106,6 +106,7 @@ HutWatchApp (app.py) - Main coordinator, signals, component lifecycle, alert rou
 ### Supporting Modules
 
 - **formatting.py** — Shared utility functions used by all UI modules: `format_age()`, `format_age_long()`, `format_uptime()`, `parse_time_arg()`, `resolve_device()`, `build_remote_device_list()`, `create_ascii_graph()`, `compute_cutoff()`. Always add shared formatting/parsing logic here instead of duplicating across UI modules.
+- **battery.py** — Low-battery state: `battery_low_state()` (pure, temperature-banded thresholds over a 72 h window with hysteresis), `update_battery_states()` (called by Aggregator every 5 min, writes into `SensorStore`), `remote_battery_low()` (peer flag, else local evaluation of flushed remote history). UIs read `store.get_battery_low(mac)`.
 - **models.py** — Dataclasses (`SensorReading`, `DeviceInfo`, `AppConfig`, `WeatherData`, etc.) and enums (`SensorType`). Pure data layer with no internal imports.
 - **demo.py** — Generates fake sensor/weather data for `--demo` mode. Uses in-memory SQLite.
 - **widget_output.py** — Standalone JSON output for desktop widgets (Übersicht widget in `widget/`, SwiftBar). Reads directly from SQLite, no app instance: `python3 -m hutwatch.widget_output -d /path/to/hutwatch.db`
@@ -281,7 +282,7 @@ Adding a command to either UI: use the `/add-command` skill — it covers i18n k
 - `api_token`: Shared secret required in `X-HutWatch-Token` for `POST /api/v1/sync`
 - `peers`: Bidirectional peer sync (recommended — each with `name`, `url`, `poll_interval`, optional `token`). Only the connector side needs this; the listener only needs `api_port`.
 - `peer_watchdog`: `threshold_seconds` (0 disables) and `check_interval_seconds` for hub-side offline alerts
-- `device_watchdog`: defaults for the auto-provisioned battery and silence alerts — `battery_voltage_low`, `battery_percent_low`, `silent_hours`, `cold_grace_temp`, `remind_days` (any threshold 0 disables that check)
+- `device_watchdog`: defaults for the auto-provisioned silence alerts and opt-in battery alerts — `battery_voltage_low`, `battery_percent_low` (both 0/off by default), `silent_hours`, `cold_grace_temp`, `remind_days` (any threshold 0 disables that check and removes its auto rules). Low batteries are always shown as a UI marker computed by `battery.py` (temperature-banded thresholds over a 72 h window, hysteresis) — no notification.
 - `remote_sites`: Legacy read-only remote monitoring (each with `name`, `url`, `poll_interval`, optional `token`)
 
 Without Telegram, use `--tui` for interactive dashboard or `--console` for simple output.

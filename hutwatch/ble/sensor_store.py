@@ -24,6 +24,7 @@ class SensorStore:
     def __init__(self) -> None:
         self._latest: dict[str, SensorReading] = {}
         self._history: dict[str, deque[SensorReading]] = {}
+        self._battery_low: dict[str, Optional[bool]] = {}
         self._lock = Lock()
 
     def add_reading(self, reading: SensorReading) -> None:
@@ -93,3 +94,13 @@ class SensorStore:
         if reading:
             return datetime.now() - reading.timestamp
         return None
+
+    def set_battery_low(self, mac: str, low: Optional[bool]) -> None:
+        """Set computed low-battery state (True/False/None = unknown)."""
+        with self._lock:
+            self._battery_low[mac.upper()] = low
+
+    def get_battery_low(self, mac: str) -> Optional[bool]:
+        """Get computed low-battery state (None if unknown)."""
+        with self._lock:
+            return self._battery_low.get(mac.upper())

@@ -19,6 +19,7 @@ try:
 except ImportError:
     _HAS_TERMIOS = False
 
+from .battery import remote_battery_low
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .alerts import AUTO_TYPES
@@ -60,6 +61,11 @@ _INPUT_KEYS = frozenset('ahsgnpwu')
 def _format_age(seconds: float) -> str:
     """Format age in seconds to human-readable string."""
     return format_age(seconds)
+
+
+def _battery_low_marker() -> str:
+    """Low-battery marker shown after a sensor line (single-width chars only)."""
+    return f"{YELLOW}{t('tui_battery_low_indicator')}{RESET}"
 
 
 class TuiDashboard:
@@ -956,6 +962,9 @@ class TuiDashboard:
                 for indicator in self._alert_indicators(mac):
                     parts.append(indicator)
 
+                if self._store.get_battery_low(mac):
+                    parts.append(_battery_low_marker())
+
                 result.append("  ".join(parts))
 
         return result
@@ -1175,6 +1184,8 @@ class TuiDashboard:
             if humidity:
                 parts.append(humidity)
             parts.append(f"{DIM}{age_str}{RESET}")
+            if remote_battery_low(self._store, s):
+                parts.append(_battery_low_marker())
             result.append("  ".join(parts))
 
         return result
@@ -1328,6 +1339,16 @@ class TuiDashboard:
                     stats = self._db.get_stats(mac, hours=24)
                     if stats:
                         parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
+
+                # Alert indicator
+                if self._alert_manager:
+                    for alert in self._alert_manager.get_alerts(mac):
+                        if alert.triggered:
+                            parts.append(f"{RED}{t('tui_alert_indicator')}{RESET}")
+                            break
+
+                if self._store.get_battery_low(mac):
+                    parts.append(_battery_low_marker())
 
                 lines.append("  ".join(parts))
 

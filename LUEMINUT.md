@@ -236,7 +236,9 @@ HutWatch varoittaa kolmesta asiasta: lämpötila ylittää tai alittaa asettamas
 
 Samat komennot toimivat TUI:ssa muodossa `a 1 batt 2.4`, ja etäanturit osoitetaan tunnuksilla `r1`, `r2`.
 
-**Paristo- ja hiljaisuushälytykset syntyvät automaattisesti.** Säännöt luodaan jokaiselle dataa raportoivalle laitteelle `device_watchdog`-asetuslohkon kynnysarvoilla, joten mitään ei tarvitse asettaa anturikohtaisesti. Käsin asetettu kynnys jää voimaan — myöhemmät muutokset asetusten oletusarvoon eivät siirrä sitä.
+**Vähissä oleva paristo näkyy merkkinä, ei ilmoituksena.** Anturirivin perään tulee merkki — TUI:ssa `akku!`, konsolissa `!`, Telegramin listoissa 🪫 — myös etä- ja peer-antureille. Nappipariston jännite heiluu lämpötilan mukana, joten merkki ei perustu hetkelliseen lukemaan: jokaista 72 tunnin ajalta tallennettua 5 minuutin mittausta verrataan lämpötilan mukaiseen rajaan (Ruuvi Stationin rajat: 2,5 V ≥ 0 °C, 2,3 V −20…0 °C, 2,0 V alle −20 °C), ja paristo merkitään vain jos se ei yltänyt rajaansa kertaakaan. Kylmät yöt tai pitkä pakkanen eivät sytytä merkkiä, ja se sammuu vasta kun jännite on 0,1 V rajan yläpuolella.
+
+**Hiljaisuushälytykset syntyvät automaattisesti** (samoin paristohälytykset, jos ne otetaan käyttöön asettamalla `battery_voltage_low` / `battery_percent_low` — oletuksena `0` eli pois). Säännöt luodaan jokaiselle dataa raportoivalle laitteelle `device_watchdog`-asetuslohkon kynnysarvoilla, joten mitään ei tarvitse asettaa anturikohtaisesti. Käsin asetettu kynnys jää voimaan — myöhemmät muutokset asetusten oletusarvoon eivät siirrä sitä.
 
 Molemmat toistuvat `remind_days` välein (oletuksena 7 vrk) niin kauan kuin tila jatkuu, joten vaihtamatta jäänyt paristo muistuttaa itsestään uudelleen. Molemmat lähettävät myös palautumisviestin kun paristo vaihdetaan tai laite palaa.
 
@@ -249,8 +251,8 @@ Oletusarvot asetetaan `config.yaml`issa:
 
 ```yaml
 device_watchdog:
-  battery_voltage_low: 2.5   # V, jännitettä raportoiville (Ruuvi CR2477)
-  battery_percent_low: 15    # %, prosentteja raportoiville (Xiaomi ATC/PVVX)
+  battery_voltage_low: 0     # V, paristohälytykset käyttöön (esim. 2.4); 0 = vain merkki
+  battery_percent_low: 0     # %, prosentteja raportoiville; 0 = pois
   silent_hours: 12
   cold_grace_temp: -15
   remind_days: 7

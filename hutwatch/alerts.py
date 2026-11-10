@@ -142,11 +142,16 @@ class AlertManager:
                 self._db.ensure_alert_default(
                     device.mac, "batt_low", float(wd.battery_percent_low), "%",
                 )
+            elif unit in ("V", "%"):
+                # Default turned off: drop rules provisioned earlier
+                self._db.remove_auto_alert(device.mac, "batt_low")
 
             if wd.silent_hours > 0:
                 self._db.ensure_alert_default(
                     device.mac, "silent", float(wd.silent_hours), "h",
                 )
+            else:
+                self._db.remove_auto_alert(device.mac, "silent")
 
     def check(self, inputs: AlertInputs) -> list[AlertEvent]:
         """Check all alert rules against the current inputs.

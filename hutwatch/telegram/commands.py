@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..battery import remote_battery_low
 from ..alerts import AUTO_TYPES
 from ..ble.sensor_store import SensorStore
 from ..formatting import (
@@ -120,6 +121,8 @@ class CommandHandlers:
                 line = f"{prefix}*{s.name}*: {s.temperature:.1f}°C"
                 if s.humidity is not None:
                     line += f", {s.humidity:.0f}%"
+                if remote_battery_low(self._store, s):
+                    line += f" {t('tg_battery_low_indicator')}"
 
                 # Effective age = sensor age + time since fetch
                 effective_age = s.age_seconds or 0
@@ -213,6 +216,8 @@ class CommandHandlers:
                     line = f"{device.display_order}. *{name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(device.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"{device.display_order}. *{name}*: {t('common_no_data_md')}"
@@ -230,6 +235,8 @@ class CommandHandlers:
                     line = f"*{sensor_config.name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(sensor_config.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"*{sensor_config.name}*: {t('common_no_data_md')}"
@@ -290,6 +297,8 @@ class CommandHandlers:
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
                     info += self._alert_indicators(device.mac)
+                    if self._store.get_battery_low(reading.mac):
+                        info += f" {t('tg_battery_low_indicator')}"
 
                     lines.append(f"  {status_emoji} {device.display_order}. {name}: {info}")
                 else:
@@ -314,6 +323,8 @@ class CommandHandlers:
                         info += f", {reading.battery_voltage:.2f}V"
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
+                    if self._store.get_battery_low(reading.mac):
+                        info += f" {t('tg_battery_low_indicator')}"
 
                     lines.append(f"  {status_emoji} {sensor_config.name}: {info}")
                 else:
@@ -1158,6 +1169,8 @@ class CommandHandlers:
                     line = f"{device.display_order}. *{name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(device.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"{device.display_order}. *{name}*: {t('common_no_data_md')}"

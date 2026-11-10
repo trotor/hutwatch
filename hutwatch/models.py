@@ -93,11 +93,14 @@ class RemoteSiteConfig:
 class DeviceWatchdogConfig:
     """Thresholds for automatic battery and silence alerts.
 
-    Set any threshold to 0 to disable that check.
+    Set any threshold to 0 to disable that check. Battery alerts are off by
+    default: low batteries are shown as a UI indicator instead (battery.py),
+    because coin-cell voltage swings with temperature and instantaneous
+    thresholds flap between triggered and recovered.
     """
 
-    battery_voltage_low: float = 2.5
-    battery_percent_low: int = 15
+    battery_voltage_low: float = 0.0
+    battery_percent_low: int = 0
     silent_hours: int = 12
     cold_grace_temp: float = -15.0
     remind_days: int = 7

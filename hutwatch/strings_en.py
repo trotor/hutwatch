@@ -226,6 +226,8 @@ STRINGS: dict = {
     "tui_sensors_label": "Sensors:",
     "tui_sensors_not_configured": "not configured",
     "tui_battery": "batt",
+    "tui_battery_low_indicator": "batt!",
+    "tg_battery_low_indicator": "🪫",
     "tui_uptime_label": "Uptime:",
 
     # ── TUI: footer commands ──────────────────────────────────────────
@@ -327,6 +329,7 @@ STRINGS: dict = {
     "console_col_temp": "Temp",
     "console_col_humidity": "Hum",
     "console_col_battery": "Batt",
+    "console_battery_low_note": "! = battery low",
     "console_col_age": "Age",
     "console_press_enter": "Press Enter to show readings, Ctrl+C to quit",
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from telegram.ext import ContextTypes
 
+from ..battery import remote_battery_low
 from ..ble.sensor_store import SensorStore
 from ..formatting import format_age_long
 from ..i18n import t
@@ -60,6 +61,8 @@ class ReportScheduler:
                 line = f"*{sensor_config.name}*: {reading.temperature:.1f}°C"
                 if reading.humidity is not None:
                     line += f", {reading.humidity:.0f}%"
+                if self._store.get_battery_low(sensor_config.mac):
+                    line += f" {t('tg_battery_low_indicator')}"
             else:
                 line = f"*{sensor_config.name}*: {t('common_no_data_md')}"
 
@@ -100,6 +103,8 @@ class ReportScheduler:
                     line = f"  *{s.name}*: {s.temperature:.1f}°C"
                     if s.humidity is not None:
                         line += f", {s.humidity:.0f}%"
+                    if remote_battery_low(self._store, s):
+                        line += f" {t('tg_battery_low_indicator')}"
                     lines.append(line)
 
         try:
