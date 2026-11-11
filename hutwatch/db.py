@@ -120,7 +120,7 @@ class Database:
             )
         """)
 
-        # Alerts table for temperature threshold alerts
+        # Alerts table for threshold alerts (temperature, battery, silence)
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
                 mac TEXT NOT NULL,
@@ -134,6 +134,20 @@ class Database:
                 PRIMARY KEY (mac, alert_type)
             )
         """)
+
+        # Migration: add unit column ('C', 'V', '%' or 'h')
+        try:
+            self._conn.execute("ALTER TABLE alerts ADD COLUMN unit TEXT DEFAULT 'C'")
+            self._conn.commit()
+        except Exception:
+            pass  # Column already exists
+
+        # Migration: add auto column (1 = provisioned from config default)
+        try:
+            self._conn.execute("ALTER TABLE alerts ADD COLUMN auto INTEGER DEFAULT 0")
+            self._conn.commit()
+        except Exception:
+            pass  # Column already exists
 
         self._conn.commit()
         logger.debug("Database tables created")
@@ -224,6 +238,29 @@ class Database:
 
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_battery_samples(
+        self,
+        mac: str,
+        hours: int,
+    ) -> list[tuple[datetime, Optional[float], Optional[float]]]:
+        """Get (timestamp, battery_voltage, temp_avg) rows for battery evaluation."""
+        if not self._conn:
+            return []
+
+        cutoff = compute_cutoff(hours, None)
+        cursor = self._conn.execute(
+            """
+            SELECT timestamp, battery_voltage, temp_avg
+            FROM readings
+            WHERE mac = ? AND timestamp >= ? AND battery_voltage IS NOT NULL
+            """,
+            (mac.upper(), cutoff.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        return [
+            (datetime.fromisoformat(row["timestamp"]), row["battery_voltage"], row["temp_avg"])
+            for row in cursor.fetchall()
+        ]
+
     def get_stats(
         self,
         mac: str,
@@ -282,6 +319,57 @@ class Database:
             (datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S"), row["temp_avg"])
             for row in cursor.fetchall()
         ]
+
+    def get_latest_battery(self, mac: str) -> Optional[tuple[float, str]]:
+        """Get the newest stored battery level for a device as (value, unit).
+
+        Returns volts when the sensor reports voltage, otherwise percent.
+        """
+        if not self._conn:
+            return None
+
+        cursor = self._conn.execute(
+            """
+            SELECT battery_voltage, battery_percent
+            FROM readings
+            WHERE mac = ? AND (battery_voltage IS NOT NULL OR battery_percent IS NOT NULL)
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (mac.upper(),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        if row["battery_voltage"] is not None:
+            return float(row["battery_voltage"]), "V"
+        if row["battery_percent"] is not None:
+            return float(row["battery_percent"]), "%"
+        return None
+
+    def get_last_reading_times(self) -> dict[str, datetime]:
+        """Get the newest stored reading timestamp per MAC.
+
+        Used for silence detection beyond the sensor store's 24 h window.
+        """
+        if not self._conn:
+            return {}
+
+        cursor = self._conn.execute(
+            "SELECT mac, MAX(timestamp) AS last_seen FROM readings GROUP BY mac"
+        )
+
+        result: dict[str, datetime] = {}
+        for row in cursor.fetchall():
+            if not row["last_seen"]:
+                continue
+            try:
+                result[row["mac"]] = datetime.strptime(
+                    row["last_seen"], "%Y-%m-%d %H:%M:%S"
+                )
+            except ValueError:
+                continue
+        return result
 
     def cleanup_old_data(self, days: int = 90) -> int:
         """Remove data older than specified days."""
@@ -410,22 +498,124 @@ class Database:
     # Alert management methods
 
     def set_alert(
-        self, mac: str, alert_type: str, threshold: float, notify_recovery: bool = False,
+        self,
+        mac: str,
+        alert_type: str,
+        threshold: float,
+        notify_recovery: bool = False,
+        unit: str = "C",
+        auto: bool = False,
     ) -> None:
-        """Create or update an alert rule."""
+        """Create or update an alert rule.
+
+        Updating an existing rule keeps its triggered state and last_triggered
+        timestamp, so re-setting a threshold does not silently clear an active
+        alert or restart its reminder clock.
+        """
         if not self._conn:
             return
         try:
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO alerts (mac, alert_type, threshold, notify_recovery, enabled, triggered)
-                VALUES (?, ?, ?, ?, 1, 0)
+                INSERT INTO alerts (mac, alert_type, threshold, notify_recovery, unit, auto, enabled, triggered)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0)
+                ON CONFLICT(mac, alert_type) DO UPDATE SET
+                    threshold = excluded.threshold,
+                    notify_recovery = excluded.notify_recovery,
+                    unit = excluded.unit,
+                    auto = excluded.auto,
+                    enabled = 1
                 """,
-                (mac.upper(), alert_type, threshold, 1 if notify_recovery else 0),
+                (
+                    mac.upper(),
+                    alert_type,
+                    threshold,
+                    1 if notify_recovery else 0,
+                    unit,
+                    1 if auto else 0,
+                ),
             )
             self._conn.commit()
         except Exception as e:
             logger.error("Error setting alert: %s", e)
+
+    def remove_auto_alert(self, mac: str, alert_type: str) -> bool:
+        """Delete an auto-provisioned rule; rules the user has edited are kept."""
+        if not self._conn:
+            return False
+        try:
+            cursor = self._conn.execute(
+                "DELETE FROM alerts WHERE mac = ? AND alert_type = ? AND auto = 1",
+                (mac.upper(), alert_type),
+            )
+            self._conn.commit()
+            if cursor.rowcount:
+                logger.info("Removed auto %s alert for %s", alert_type, mac)
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing auto alert: %s", e)
+            return False
+
+    def ensure_alert_default(
+        self, mac: str, alert_type: str, threshold: float, unit: str,
+    ) -> None:
+        """Provision an auto-managed alert rule from a config default.
+
+        Inserts the rule when absent. When it exists and is still auto-managed
+        (auto = 1), its threshold follows the config default. Rules the user has
+        edited (auto = 0) are left untouched.
+        """
+        if not self._conn:
+            return
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO alerts (mac, alert_type, threshold, unit, auto, enabled, triggered)
+                VALUES (?, ?, ?, ?, 1, 1, 0)
+                ON CONFLICT(mac, alert_type) DO UPDATE SET
+                    threshold = excluded.threshold,
+                    unit = excluded.unit
+                WHERE alerts.auto = 1
+                """,
+                (mac.upper(), alert_type, threshold, unit),
+            )
+            self._conn.commit()
+        except Exception as e:
+            logger.error("Error ensuring default alert: %s", e)
+
+    def set_alert_enabled(self, mac: str, alert_type: str, enabled: bool) -> bool:
+        """Enable or disable an alert rule. Returns True if a row was updated."""
+        if not self._conn:
+            return False
+        try:
+            cursor = self._conn.execute(
+                """
+                UPDATE alerts SET enabled = ?, triggered = 0
+                WHERE mac = ? AND alert_type = ?
+                """,
+                (1 if enabled else 0, mac.upper(), alert_type),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting alert enabled state: %s", e)
+            return False
+
+    def touch_alert_triggered(self, mac: str, alert_type: str) -> None:
+        """Bump last_triggered without changing the triggered flag (reminders)."""
+        if not self._conn:
+            return
+        try:
+            self._conn.execute(
+                """
+                UPDATE alerts SET last_triggered = CURRENT_TIMESTAMP
+                WHERE mac = ? AND alert_type = ?
+                """,
+                (mac.upper(), alert_type),
+            )
+            self._conn.commit()
+        except Exception as e:
+            logger.error("Error touching alert timestamp: %s", e)
 
     def remove_alert(self, mac: str, alert_type: str) -> bool:
         """Remove an alert rule. Returns True if a row was deleted."""

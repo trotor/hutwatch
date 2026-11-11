@@ -226,6 +226,8 @@ STRINGS: dict = {
     "tui_sensors_label": "Sensors:",
     "tui_sensors_not_configured": "not configured",
     "tui_battery": "batt",
+    "tui_battery_low_indicator": "batt!",
+    "tg_battery_low_indicator": "🪫",
     "tui_uptime_label": "Uptime:",
 
     # ── TUI: footer commands ──────────────────────────────────────────
@@ -327,6 +329,7 @@ STRINGS: dict = {
     "console_col_temp": "Temp",
     "console_col_humidity": "Hum",
     "console_col_battery": "Batt",
+    "console_battery_low_note": "! = battery low",
     "console_col_age": "Age",
     "console_press_enter": "Press Enter to show readings, Ctrl+C to quit",
 
@@ -339,30 +342,46 @@ STRINGS: dict = {
     "alert_direction_above": "above",
     "alert_none": "No alerts configured",
     "alert_list_header": "🔔 *Alerts*\n",
-    "alert_list_item": "{order}. *{name}*: {type} {threshold:.1f}°C {status}",
+    "alert_list_item": "{order}. *{name}*: {type} {threshold} {status}",
     "alert_status_ok": "✅",
     "alert_status_triggered": "⚠️",
     "alert_status_disabled": "⏸",
-    "alert_set_success": "✅ Alert set: *{name}* {type} {threshold:.1f}°C",
+    "alert_set_success": "✅ Alert set: *{name}* {type} {threshold}",
     "alert_removed": "✅ Alert removed: *{name}* {type}",
+    "alert_disabled": "✅ Alert disabled: *{name}* {type}",
     "alert_not_found": "Alert not found: {name} {type}",
     "alert_recovery_on": "✅ Recovery notification on: *{name}* {type}",
     "alert_recovery_off": "✅ Recovery notification off: *{name}* {type}",
+    # Battery and silence alerts
+    "alert_type_batt_low": "battery",
+    "alert_type_silent": "silence",
+    "alert_battery_low": "🪫 *{name}*: Battery low ({value}, limit {threshold})",
+    "alert_battery_reminder": "🪫 *{name}*: Battery still low ({value}) — reminder",
+    "alert_battery_recovery": "🔋 *{name}*: Battery back to normal ({value})",
+    "alert_silent": "🔇 *{name}*: No reading for {value} (limit {threshold})",
+    "alert_silent_reminder": "🔇 *{name}*: Still quiet, {value} since last reading — reminder",
+    "alert_silent_recovery": "🔊 *{name}*: Device is responding again",
+    "alert_auto_marker": "auto",
+    "alert_battery_indicator": "🪫",
+    "alert_silent_indicator": "🔇",
+    "alert_battery_unknown": "Device does not report battery level: {name}",
     "tg_alert_usage": (
         "Usage:\n"
         "`/alert` - show alerts\n"
-        "`/alert <device> low <value>` - set low threshold\n"
-        "`/alert <device> high <value>` - set high threshold\n"
-        "`/alert <device> low off` - remove low threshold\n"
-        "`/alert <device> high off` - remove high threshold\n"
+        "`/alert <device> low <value>` - set low temperature threshold\n"
+        "`/alert <device> high <value>` - set high temperature threshold\n"
+        "`/alert <device> batt <value>` - battery threshold (V or %)\n"
+        "`/alert <device> silent <hours>` - silence threshold\n"
+        "`/alert <device> low|high|batt|silent off` - disable\n"
         "`/alert <device> recovery on/off` - recovery notification\n"
+        "Battery and silence thresholds are created automatically from config.\n"
         "Remote sensors: `r1`, `r2` etc."
     ),
     "alert_available_devices": "*Devices:*",
     "alert_device_local": "{order}. {name}",
     "alert_device_remote": "{r_id}. ↗ {site} / {name}  (`{mac}`)",
     "tui_cmd_alert": "[a] alerts",
-    "tui_alert_usage": "Usage: a <num/r1> low/high <value>  or  a <num/r1> low/high off",
+    "tui_alert_usage": "Usage: a <num/r1> low|high|batt|silent <value>  or  ... off",
     "tui_alert_cursor_hint": "↑↓ select device  Enter select  Esc cancel  q quit",
     "tui_alert_indicator": "⚠",
 }

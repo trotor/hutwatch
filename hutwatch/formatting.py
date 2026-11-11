@@ -230,3 +230,46 @@ def create_ascii_graph(
         timeline = ""
 
     return "\n".join(lines), timeline
+
+
+def format_alert_value(value: float, unit: str) -> str:
+    """Render an alert threshold or measurement with its unit."""
+    if unit == "V":
+        return f"{value:.2f}V"
+    if unit == "%":
+        return f"{value:.0f}%"
+    if unit == "h":
+        if value >= 48:
+            return t("time_days", n=int(value // 24))
+        return t("time_short_hours", n=int(value))
+    return f"{value:.1f}°C"
+
+
+def resolve_alert_type(action: str) -> Optional[tuple[str, str]]:
+    """Map a user-typed alert action to (alert_type, translated label).
+
+    Returns None for an unknown action.
+    """
+    mapping = {
+        "low": ("temp_low", "alert_temp_low"),
+        "high": ("temp_high", "alert_temp_high"),
+        "batt": ("batt_low", "alert_type_batt_low"),
+        "battery": ("batt_low", "alert_type_batt_low"),
+        "silent": ("silent", "alert_type_silent"),
+    }
+    entry = mapping.get(action.lower())
+    if not entry:
+        return None
+    alert_type, label_key = entry
+    return alert_type, t(label_key)
+
+
+def alert_type_label(alert_type: str) -> str:
+    """Translated label for a stored alert type."""
+    keys = {
+        "temp_low": "alert_temp_low",
+        "temp_high": "alert_temp_high",
+        "batt_low": "alert_type_batt_low",
+        "silent": "alert_type_silent",
+    }
+    return t(keys.get(alert_type, "alert_temp_low"))

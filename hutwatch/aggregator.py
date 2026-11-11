@@ -8,11 +8,14 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from .alerts import AlertManager
+from .battery import update_battery_states
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .models import AppConfig
 
 if TYPE_CHECKING:
+    from .alerts import AlertInputs
+    from .models import SensorReading
     from .remote import RemotePoller
     from .weather import WeatherFetcher
 
@@ -23,6 +26,15 @@ AGGREGATION_INTERVAL = 300
 
 # Weather fetch interval in seconds (1 hour)
 WEATHER_FETCH_INTERVAL = 3600
+
+# Grace period after startup before silence alerts are evaluated (15 minutes),
+# so BLE has time to pick up advertisements before anything looks quiet
+SILENCE_GRACE_SECONDS = 900
+
+# Devices unheard from for longer than this get no new auto rules. Device rows
+# outlive the sensors themselves — macOS rotates its BLE identifiers, so old
+# rows accumulate — and a sensor that vanished months ago is not news.
+AUTO_RULE_MAX_AGE_DAYS = 7
 
 
 class Aggregator:
@@ -46,6 +58,7 @@ class Aggregator:
         self._alert_manager: Optional[AlertManager] = None
         self._alert_callback = None  # async callable(list[AlertEvent])
         self._remote: Optional["RemotePoller"] = None
+        self._start_time = datetime.now()
 
     async def start(self) -> None:
         """Start the aggregator."""
@@ -54,6 +67,7 @@ class Aggregator:
 
         logger.info("Starting data aggregator (interval: %ds)", AGGREGATION_INTERVAL)
         self._running = True
+        self._start_time = datetime.now()
         self._task = asyncio.create_task(self._run())
 
         if self._weather:
@@ -107,6 +121,9 @@ class Aggregator:
 
     async def _run(self) -> None:
         """Main aggregation loop."""
+        # Evaluate battery state from stored history right away
+        self._update_battery_states()
+
         while self._running:
             try:
                 await asyncio.sleep(AGGREGATION_INTERVAL)
@@ -183,48 +200,173 @@ class Aggregator:
                 temp_max,
             )
 
+        # Flush buffered remote readings into the same 5-min bucket
+        if self._remote is not None:
+            try:
+                n = self._remote.flush_readings_to_db(timestamp)
+                if n:
+                    logger.debug("Flushed %d remote sensor aggregates", n)
+            except Exception as e:
+                logger.warning("Failed to flush remote readings: %s", e)
+
+        self._update_battery_states()
+
         # Check alert thresholds
         if self._alert_manager and self._alert_callback:
             try:
-                current_readings = {}
-                device_names = {}
-
-                # Local sensors
-                for sensor_config in self._config.sensors:
-                    mac = sensor_config.mac
-                    history = self._store.get_history(mac, hours=1)
-                    if history:
-                        current_readings[mac] = history[-1]
-                        device = self._db.get_device(mac)
-                        if device:
-                            device_names[mac] = device.get_display_name()
-                        else:
-                            device_names[mac] = sensor_config.name
-
-                # Remote/peer sensors
-                if self._remote:
-                    from .models import SensorReading
-
-                    for site_name, site_data in self._remote.get_all_site_data().items():
-                        if not site_data.online:
-                            continue
-                        for sensor in site_data.sensors:
-                            if sensor.mac and sensor.temperature is not None:
-                                mac = sensor.mac.upper()
-                                if mac not in current_readings:
-                                    current_readings[mac] = SensorReading(
-                                        mac=mac,
-                                        timestamp=datetime.now(),
-                                        temperature=sensor.temperature,
-                                        humidity=sensor.humidity,
-                                    )
-                                    device_names[mac] = f"{site_name} / {sensor.name}"
-
-                events = self._alert_manager.check(current_readings, device_names)
+                inputs = self._build_alert_inputs(now)
+                events = self._alert_manager.check(inputs)
                 if events:
                     await self._alert_callback(events)
             except Exception as e:
                 logger.error("Alert check error: %s", e)
+
+    def _build_alert_inputs(self, now: datetime) -> "AlertInputs":
+        """Collect temperature, battery and last-seen data for the alert pass."""
+        from .alerts import AlertInputs, DeviceHealth
+        from .models import SensorReading
+
+        inputs = AlertInputs()
+
+        # Silence checks need BLE to have had a chance to hear the sensors first
+        inputs.check_silence = (
+            now - self._start_time >= timedelta(seconds=SILENCE_GRACE_SECONDS)
+        )
+
+        # Local devices plus every peer's — get_all_devices() returns only
+        # site IS NULL rows, and peer sensors need watching just as much
+        devices = self._db.get_all_devices(include_hidden=True)
+        if self._remote:
+            for site_name in self._remote.get_all_site_data():
+                devices.extend(self._db.get_all_devices(site=site_name))
+        device_map = {d.mac: d for d in devices}
+        battery_units: dict[str, str] = {}
+        auto_eligible: set[str] = set()
+
+        stored_last_seen = self._db.get_last_reading_times()
+
+        # ── Local sensors ─────────────────────────────────────────────
+        for sensor_config in self._config.sensors:
+            mac = sensor_config.mac
+            device = device_map.get(mac)
+            if device and device.hidden:
+                continue
+
+            if device:
+                inputs.device_names[mac] = device.get_display_name()
+            else:
+                inputs.device_names[mac] = sensor_config.name
+
+            health = DeviceHealth()
+
+            history = self._store.get_history(mac, hours=1)
+            latest = history[-1] if history else None
+            if latest:
+                inputs.readings[mac] = latest
+                health.temperature = latest.temperature
+
+            last_seen = latest.timestamp if latest else stored_last_seen.get(mac)
+            if last_seen:
+                health.silent_hours = (now - last_seen).total_seconds() / 3600
+            else:
+                # Never heard from: measure silence from app start so a sensor
+                # that never appears still eventually raises an alert
+                health.silent_hours = (now - self._start_time).total_seconds() / 3600
+
+            # Battery: prefer a live reading, fall back to the last stored one
+            battery = self._latest_battery(mac, latest)
+            if battery:
+                health.battery_value, health.battery_unit = battery
+                if self._eligible_for_auto_rules(health.silent_hours):
+                    battery_units[mac] = health.battery_unit
+
+            inputs.health[mac] = health
+            if self._eligible_for_auto_rules(health.silent_hours):
+                auto_eligible.add(mac)
+
+        # ── Remote/peer sensors ───────────────────────────────────────
+        if self._remote:
+            for site_name, site_data in self._remote.get_all_site_data().items():
+                # A whole site going dark is the peer watchdog's job
+                if not site_data.online:
+                    continue
+                for sensor in site_data.sensors:
+                    if not sensor.mac:
+                        continue
+                    mac = sensor.mac.upper()
+                    if mac in inputs.health:
+                        continue
+                    device = device_map.get(mac)
+                    if device and device.hidden:
+                        continue
+
+                    inputs.device_names[mac] = f"{site_name} / {sensor.name}"
+
+                    if sensor.temperature is not None:
+                        inputs.readings[mac] = SensorReading(
+                            mac=mac,
+                            timestamp=now,
+                            temperature=sensor.temperature,
+                            humidity=sensor.humidity,
+                        )
+
+                    health = DeviceHealth(temperature=sensor.temperature)
+                    if sensor.battery_voltage is not None:
+                        health.battery_value = sensor.battery_voltage
+                        health.battery_unit = "V"
+                    elif sensor.battery_percent is not None:
+                        health.battery_value = float(sensor.battery_percent)
+                        health.battery_unit = "%"
+
+                    if sensor.age_seconds is not None:
+                        health.silent_hours = sensor.age_seconds / 3600
+
+                    inputs.health[mac] = health
+                    if self._eligible_for_auto_rules(health.silent_hours):
+                        auto_eligible.add(mac)
+                        if health.battery_unit:
+                            battery_units[mac] = health.battery_unit
+
+        # Provision auto-managed rules for the devices we have recently heard from
+        known = [d for d in devices if d.mac in auto_eligible]
+        self._alert_manager.sync_default_rules(known, battery_units)
+
+        return inputs
+
+    @staticmethod
+    def _eligible_for_auto_rules(silent_hours: Optional[float]) -> bool:
+        """Whether a device is recent enough to be given auto-managed rules."""
+        if silent_hours is None:
+            return True
+        return silent_hours <= AUTO_RULE_MAX_AGE_DAYS * 24
+
+    def _latest_battery(
+        self, mac: str, latest: Optional["SensorReading"],
+    ) -> Optional[tuple[float, str]]:
+        """Get the most recent battery level and its unit for a device."""
+        if latest is not None:
+            if latest.battery_voltage is not None:
+                return latest.battery_voltage, "V"
+            if latest.battery_percent is not None:
+                return float(latest.battery_percent), "%"
+
+        stored = self._db.get_latest_battery(mac)
+        if stored:
+            return stored
+        return None
+
+    def _update_battery_states(self) -> None:
+        """Recompute low-battery flags for local and remote/peer sensors.
+
+        Remote readings are flushed into the local readings table, so their
+        battery history is evaluated here too — older peers don't send a
+        battery_low flag of their own.
+        """
+        macs = [s.mac for s in self._config.sensors]
+        if self._remote:
+            for site_data in self._remote.get_all_site_data().values():
+                macs.extend(s.mac.upper() for s in site_data.sensors if s.mac)
+        update_battery_states(self._store, self._db, macs)
 
     async def _run_weather(self) -> None:
         """Weather fetch loop."""

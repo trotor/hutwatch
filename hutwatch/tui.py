@@ -19,13 +19,18 @@ try:
 except ImportError:
     _HAS_TERMIOS = False
 
+from .battery import remote_battery_low
 from .ble.sensor_store import SensorStore
 from .db import Database
+from .alerts import AUTO_TYPES
 from .formatting import (
+    alert_type_label,
     build_remote_device_list,
     create_ascii_graph,
     format_age,
+    format_alert_value,
     parse_time_arg,
+    resolve_alert_type,
     resolve_device,
 )
 from .i18n import t, wind_direction_text
@@ -56,6 +61,11 @@ _INPUT_KEYS = frozenset('ahsgnpwu')
 def _format_age(seconds: float) -> str:
     """Format age in seconds to human-readable string."""
     return format_age(seconds)
+
+
+def _battery_low_marker() -> str:
+    """Low-battery marker shown after a sensor line (single-width chars only)."""
+    return f"{YELLOW}{t('tui_battery_low_indicator')}{RESET}"
 
 
 class TuiDashboard:
@@ -621,7 +631,7 @@ class TuiDashboard:
             return None
 
     def _handle_alert_cmd(self, args: list[str]) -> None:
-        """Handle alert command: a, a <n> low/high <value>, a <n> low/high off."""
+        """Handle alert command: a, a <n> low|high|batt|silent <value|off>."""
         if not self._alert_manager:
             self._status_msg = t("common_db_not_available")
             return
@@ -654,26 +664,82 @@ class TuiDashboard:
             self._status_msg = t(msg_key, name=name, type=type_label)
             return
 
-        if action not in ("low", "high"):
+        resolved = resolve_alert_type(action)
+        if not resolved:
             self._status_msg = t("tui_alert_usage")
             return
 
-        alert_type = "temp_low" if action == "low" else "temp_high"
-        type_label = t("alert_temp_low") if action == "low" else t("alert_temp_high")
+        alert_type, type_label = resolved
 
         if value == "off":
             if self._alert_manager.remove_alert(device.mac, alert_type):
-                self._status_msg = t("alert_removed", name=name, type=type_label)
+                key = "alert_disabled" if alert_type in AUTO_TYPES else "alert_removed"
+                self._status_msg = t(key, name=name, type=type_label)
             else:
                 self._status_msg = t("alert_not_found", name=name, type=type_label)
-        else:
-            try:
-                threshold = float(value)
-            except ValueError:
-                self._status_msg = t("tui_alert_usage")
-                return
-            self._alert_manager.set_alert(device.mac, alert_type, threshold)
-            self._status_msg = t("alert_set_success", name=name, type=type_label, threshold=threshold)
+            return
+
+        try:
+            threshold = float(value)
+        except ValueError:
+            self._status_msg = t("tui_alert_usage")
+            return
+
+        unit = self._alert_unit(device.mac, alert_type)
+        if unit is None:
+            self._status_msg = t("alert_battery_unknown", name=name)
+            return
+
+        self._alert_manager.set_alert(device.mac, alert_type, threshold, unit=unit)
+        self._status_msg = t(
+            "alert_set_success",
+            name=name,
+            type=type_label,
+            threshold=format_alert_value(threshold, unit),
+        )
+
+    def _alert_indicators(self, mac: str) -> list[str]:
+        """Status markers for a device's currently triggered alerts."""
+        if not self._alert_manager:
+            return []
+
+        indicators: list[str] = []
+        temp_shown = False
+        for alert in self._alert_manager.get_alerts(mac):
+            if not alert.enabled or not alert.triggered:
+                continue
+            if alert.alert_type == "batt_low":
+                indicators.append(f"{RED}{t('alert_battery_indicator')}{RESET}")
+            elif alert.alert_type == "silent":
+                indicators.append(f"{RED}{t('alert_silent_indicator')}{RESET}")
+            elif not temp_shown:
+                indicators.append(f"{RED}{t('tui_alert_indicator')}{RESET}")
+                temp_shown = True
+        return indicators
+
+    def _alert_unit(self, mac: str, alert_type: str) -> Optional[str]:
+        """Resolve the unit for a new alert rule, or None if undeterminable."""
+        if alert_type == "silent":
+            return "h"
+        if alert_type != "batt_low":
+            return "C"
+
+        reading = self._store.get_latest(mac)
+        if reading is not None:
+            if reading.battery_voltage is not None:
+                return "V"
+            if reading.battery_percent is not None:
+                return "%"
+
+        stored = self._db.get_latest_battery(mac)
+        if stored:
+            return stored[1]
+
+        # Keep an existing rule's unit when the sensor is currently quiet
+        for rule in self._alert_manager.get_alerts(mac):
+            if rule.alert_type == "batt_low":
+                return rule.unit
+        return None
 
     def _resolve_device(self, identifier: str) -> Optional[DeviceInfo]:
         """Resolve device by order number, alias, config name, MAC, or r<N>."""
@@ -892,12 +958,16 @@ class TuiDashboard:
                     if stats:
                         parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
 
-                # Alert indicator
-                if self._alert_manager:
-                    for alert in self._alert_manager.get_alerts(mac):
-                        if alert.triggered:
-                            parts.append(f"{RED}{t('tui_alert_indicator')}{RESET}")
-                            break
+                # Alert indicators, one per triggered condition
+                alert_indicators = self._alert_indicators(mac)
+                parts.extend(alert_indicators)
+
+                # A triggered batt_low alert already marks the battery
+                batt_alert = t("alert_battery_indicator")
+                if self._store.get_battery_low(mac) and not any(
+                    batt_alert in i for i in alert_indicators
+                ):
+                    parts.append(_battery_low_marker())
 
                 result.append("  ".join(parts))
 
@@ -1118,6 +1188,8 @@ class TuiDashboard:
             if humidity:
                 parts.append(humidity)
             parts.append(f"{DIM}{age_str}{RESET}")
+            if remote_battery_low(self._store, s):
+                parts.append(_battery_low_marker())
             result.append("  ".join(parts))
 
         return result
@@ -1271,6 +1343,16 @@ class TuiDashboard:
                     stats = self._db.get_stats(mac, hours=24)
                     if stats:
                         parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
+
+                # Alert indicator
+                if self._alert_manager:
+                    for alert in self._alert_manager.get_alerts(mac):
+                        if alert.triggered:
+                            parts.append(f"{RED}{t('tui_alert_indicator')}{RESET}")
+                            break
+
+                if self._store.get_battery_low(mac):
+                    parts.append(_battery_low_marker())
 
                 lines.append("  ".join(parts))
 
@@ -1710,7 +1792,7 @@ class TuiDashboard:
                 else:
                     name = alert.mac
                     order_str = " "
-                type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+                type_label = alert_type_label(alert.alert_type)
                 if not alert.enabled:
                     status = t("alert_status_disabled")
                 elif alert.triggered:
@@ -1718,8 +1800,10 @@ class TuiDashboard:
                 else:
                     status = f"{GREEN}{t('alert_status_ok')}{RESET}"
                 recovery = " 🔔" if alert.notify_recovery else ""
+                auto = f" {DIM}({t('alert_auto_marker')}){RESET}" if alert.auto else ""
+                threshold = format_alert_value(alert.threshold, alert.unit)
                 lines.append(
-                    f"  {order_str} {name}: {type_label} {alert.threshold:.1f}°C {status}{recovery}"
+                    f"  {order_str} {name}: {type_label} {threshold} {status}{recovery}{auto}"
                 )
         else:
             lines.append(f"  {t('alert_none')}")

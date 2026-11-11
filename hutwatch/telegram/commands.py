@@ -10,13 +10,18 @@ from typing import TYPE_CHECKING, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..battery import remote_battery_low
+from ..alerts import AUTO_TYPES
 from ..ble.sensor_store import SensorStore
 from ..formatting import (
+    alert_type_label,
     build_remote_device_list,
     create_ascii_graph,
     format_age_long,
+    format_alert_value,
     format_uptime,
     parse_time_arg,
+    resolve_alert_type,
     resolve_device,
 )
 from ..i18n import t, wind_direction_text
@@ -82,34 +87,42 @@ class CommandHandlers:
 
         lines: list[str] = []
         now = datetime.now()
+        remote_ids = self._remote_id_map()
 
         for site_name, site_data in self._remote.get_all_site_data().items():
+            direction = "⇄" if self._is_peer_site(site_name) else "→"
+
             if not site_data.sensors:
                 if not site_data.online:
                     lines.append("")
-                    direction = "⇄" if self._is_peer_site(site_name) else "→"
-                    lines.append(f"{direction} *{site_data.site_name}*: _{t('remote_offline')}_")
+                    status_parts = [t("remote_offline")]
+                    if site_data.last_fetch:
+                        fetch_age = (now - site_data.last_fetch).total_seconds()
+                        status_parts.append(
+                            t("remote_last_seen", age=format_age_long(fetch_age))
+                        )
+                    status_str = ", ".join(status_parts)
+                    lines.append(f"{direction} *{site_data.site_name}*: _{status_str}_")
                 continue
 
-            # Site header with fetch info
-            fetch_str = ""
-            if site_data.last_fetch:
-                fetch_age = (now - site_data.last_fetch).total_seconds()
-                fetch_str = f" _({t('time_fetched_ago', age=format_age_long(fetch_age))})_"
-
-            direction = "⇄" if self._is_peer_site(site_name) else "→"
+            # Site header. Per-sensor age already encodes staleness, so we don't
+            # duplicate fetch age on the header — just an offline marker if needed.
             offline_str = f" _{t('remote_offline')}_" if not site_data.online else ""
-
             lines.append("")
-            lines.append(f"{direction} *{site_data.site_name}*{offline_str}{fetch_str}")
+            lines.append(f"{direction} *{site_data.site_name}*{offline_str}")
 
             for s in site_data.sensors:
                 if s.temperature is None:
                     continue
 
-                line = f"  *{s.name}*: {s.temperature:.1f}°C"
+                r_id = remote_ids.get(s.mac.upper(), "") if s.mac else ""
+                prefix = f"{r_id}. " if r_id else ""
+
+                line = f"{prefix}*{s.name}*: {s.temperature:.1f}°C"
                 if s.humidity is not None:
                     line += f", {s.humidity:.0f}%"
+                if remote_battery_low(self._store, s):
+                    line += f" {t('tg_battery_low_indicator')}"
 
                 # Effective age = sensor age + time since fetch
                 effective_age = s.age_seconds or 0
@@ -119,10 +132,14 @@ class CommandHandlers:
 
                 lines.append(line)
 
-            # Remote weather if available
+            # Remote weather. Drop the bold location when it would just repeat
+            # the site name above.
             if site_data.weather:
                 w = site_data.weather
-                weather_line = f"  🌤️ *{w.location or site_data.site_name}*: {w.temperature:.1f}°C"
+                if not w.location or w.location == site_data.site_name:
+                    weather_line = f"🌤️ {w.temperature:.1f}°C"
+                else:
+                    weather_line = f"🌤️ *{w.location}*: {w.temperature:.1f}°C"
                 if w.humidity is not None:
                     weather_line += f", {w.humidity:.0f}%"
                 lines.append(weather_line)
@@ -134,6 +151,27 @@ class CommandHandlers:
         if not self._remote:
             return False
         return self._remote.is_peer(site_name) or self._remote.is_incoming_peer(site_name)
+
+    def _has_remote_data(self) -> bool:
+        """Return True if any remote site has data to display."""
+        return bool(self._remote and self._remote.get_all_site_data())
+
+    def _local_site_name(self) -> Optional[str]:
+        """Resolve the local instance's site name from config or db setting."""
+        if self._config.site_name:
+            return self._config.site_name
+        if self._db:
+            return self._db.get_setting("site_name")
+        return None
+
+    def _remote_id_map(self) -> dict[str, str]:
+        """Build a MAC → r-id map for the currently visible remote devices."""
+        if not self._remote:
+            return {}
+        return {
+            mac.upper(): r_id
+            for r_id, _, _, mac in build_remote_device_list(self._remote)
+        }
 
     @property
     def reports_enabled(self) -> bool:
@@ -156,6 +194,14 @@ class CommandHandlers:
 
         lines = [t("tg_temps_header", timestamp=_format_timestamp())]
 
+        # Local site header — only shown when remote sites are also listed,
+        # so the local block has visual symmetry with the remote site headers.
+        if self._has_remote_data():
+            local_name = self._local_site_name()
+            if local_name:
+                lines.append("")
+                lines.append(f"🏡 *{local_name}*")
+
         # Use device ordering if database is available
         if self._db:
             devices = self._get_devices_with_config_names()
@@ -170,6 +216,8 @@ class CommandHandlers:
                     line = f"{device.display_order}. *{name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(device.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"{device.display_order}. *{name}*: {t('common_no_data_md')}"
@@ -187,6 +235,8 @@ class CommandHandlers:
                     line = f"*{sensor_config.name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(sensor_config.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"*{sensor_config.name}*: {t('common_no_data_md')}"
@@ -246,6 +296,14 @@ class CommandHandlers:
                         info += f", {reading.battery_voltage:.2f}V"
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
+                    alert_markers = self._alert_indicators(device.mac)
+                    info += alert_markers
+                    # A triggered batt_low alert already shows the same 🪫 marker
+                    if (
+                        self._store.get_battery_low(reading.mac)
+                        and t("alert_battery_indicator") not in alert_markers
+                    ):
+                        info += f" {t('tg_battery_low_indicator')}"
 
                     lines.append(f"  {status_emoji} {device.display_order}. {name}: {info}")
                 else:
@@ -270,6 +328,8 @@ class CommandHandlers:
                         info += f", {reading.battery_voltage:.2f}V"
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
+                    if self._store.get_battery_low(reading.mac):
+                        info += f" {t('tg_battery_low_indicator')}"
 
                     lines.append(f"  {status_emoji} {sensor_config.name}: {info}")
                 else:
@@ -287,14 +347,19 @@ class CommandHandlers:
         if self._remote:
             remote_data = self._remote.get_all_site_data()
             if remote_data:
+                now = datetime.now()
                 lines.append("")
                 for site_name, site_data in remote_data.items():
                     direction = "⇄" if self._is_peer_site(site_name) else "→"
+                    fetch_str = ""
+                    if site_data.last_fetch:
+                        fetch_age = (now - site_data.last_fetch).total_seconds()
+                        fetch_str = f" _({t('remote_last_seen', age=format_age_long(fetch_age))})_"
                     if site_data.online:
                         n_sensors = len([s for s in site_data.sensors if s.temperature is not None])
-                        lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors")
+                        lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors{fetch_str}")
                     else:
-                        lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}")
+                        lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}{fetch_str}")
 
         # Report status
         report_status = t("tg_status_report_on") if self._reports_enabled else t("tg_status_report_off")
@@ -843,17 +908,9 @@ class CommandHandlers:
                 )
                 return
 
-            graph, timeline = self._create_ascii_graph(data, width=width, height=8)
-            temps = [tmp for _, tmp in data]
-            avg_abbr = t("common_avg_abbr").title()
-
-            text = (
-                f"🌤️ *{display_name}* ({time_str}) ({_format_timestamp()})\n"
-                f"```\n{graph}\n{timeline}```\n"
-                f"Min: {min(temps):.1f}°C | Max: {max(temps):.1f}°C | {avg_abbr}: {sum(temps)/len(temps):.1f}°C"
+            await self._send_temperature_graph(
+                update.effective_message, data, display_name, time_str, hours, width, "🌤️",
             )
-
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         # Try to resolve device by number/alias/name/MAC
@@ -873,17 +930,45 @@ class CommandHandlers:
             )
             return
 
-        graph, timeline = self._create_ascii_graph(data, width=width, height=8)
-        temps = [tmp for _, tmp in data]
-        avg_abbr = t("common_avg_abbr").title()
-
-        text = (
-            f"📈 *{display_name}* ({time_str}) ({_format_timestamp()})\n"
-            f"```\n{graph}\n{timeline}```\n"
-            f"Min: {min(temps):.1f}°C | Max: {max(temps):.1f}°C | {avg_abbr}: {sum(temps)/len(temps):.1f}°C"
+        await self._send_temperature_graph(
+            update.effective_message, data, display_name, time_str, hours, width, "📈",
         )
 
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+    async def _send_temperature_graph(
+        self,
+        message,
+        data: list[tuple[datetime, float]],
+        display_name: str,
+        time_str: str,
+        hours: int,
+        width: int,
+        emoji: str,
+    ) -> None:
+        """Send a temperature graph as PNG (or ASCII fallback) with stats caption."""
+        temps = [tmp for _, tmp in data]
+        avg_abbr = t("common_avg_abbr").title()
+        stats_line = (
+            f"Min: {min(temps):.1f}°C | Max: {max(temps):.1f}°C | "
+            f"{avg_abbr}: {sum(temps)/len(temps):.1f}°C"
+        )
+        header = f"{emoji} *{display_name}* ({time_str}) ({_format_timestamp()})"
+
+        from .plot import render_temperature_graph
+        buf = render_temperature_graph(data, f"{display_name} ({time_str})", hours)
+
+        if buf is not None:
+            await message.reply_photo(
+                photo=buf,
+                caption=f"{header}\n{stats_line}",
+                parse_mode="Markdown",
+            )
+            return
+
+        graph, timeline = self._create_ascii_graph(data, width=width, height=8)
+        await message.reply_text(
+            f"{header}\n```\n{graph}\n{timeline}```\n{stats_line}",
+            parse_mode="Markdown",
+        )
 
     def _create_ascii_graph(
         self,
@@ -1070,6 +1155,12 @@ class CommandHandlers:
         """Send temperatures with navigation buttons."""
         lines = [t("tg_temps_header", timestamp=_format_timestamp())]
 
+        if self._has_remote_data():
+            local_name = self._local_site_name()
+            if local_name:
+                lines.append("")
+                lines.append(f"🏡 *{local_name}*")
+
         if self._db:
             devices = self._get_devices_with_config_names()
             for device in devices:
@@ -1083,6 +1174,8 @@ class CommandHandlers:
                     line = f"{device.display_order}. *{name}*: {reading.temperature:.1f}°C"
                     if reading.humidity is not None:
                         line += f", {reading.humidity:.0f}%"
+                    if self._store.get_battery_low(device.mac):
+                        line += f" {t('tg_battery_low_indicator')}"
                     line += f" _{age_str}_"
                 else:
                     line = f"{device.display_order}. *{name}*: {t('common_no_data_md')}"
@@ -1320,14 +1413,19 @@ class CommandHandlers:
             if self._remote:
                 remote_data = self._remote.get_all_site_data()
                 if remote_data:
+                    now = datetime.now()
                     lines.append("")
                     for site_name, site_data in remote_data.items():
                         direction = "⇄" if self._is_peer_site(site_name) else "→"
+                        fetch_str = ""
+                        if site_data.last_fetch:
+                            fetch_age = (now - site_data.last_fetch).total_seconds()
+                            fetch_str = f" _({t('remote_last_seen', age=format_age_long(fetch_age))})_"
                         if site_data.online:
                             n_sensors = len([s for s in site_data.sensors if s.temperature is not None])
-                            lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors")
+                            lines.append(f"  ✅ {direction} {site_data.site_name}: {n_sensors} sensors{fetch_str}")
                         else:
-                            lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}")
+                            lines.append(f"  ❌ {direction} {site_data.site_name}: {t('remote_offline')}{fetch_str}")
 
             # Uptime
             uptime = datetime.now() - self._start_time
@@ -1513,24 +1611,22 @@ class CommandHandlers:
             return
 
         # Validate alert type
-        if alert_type_str == "low":
-            alert_type = "temp_low"
-            type_label = t("alert_temp_low")
-        elif alert_type_str == "high":
-            alert_type = "temp_high"
-            type_label = t("alert_temp_high")
-        else:
+        resolved = resolve_alert_type(alert_type_str)
+        if not resolved:
             await update.effective_message.reply_text(
                 t("tg_alert_usage"),
                 parse_mode="Markdown",
             )
             return
 
-        # Handle "off" → remove alert
+        alert_type, type_label = resolved
+
+        # Handle "off" → remove or disable the alert
         if value_str.lower() == "off":
             if self._alert_manager.remove_alert(device.mac, alert_type):
+                key = "alert_disabled" if alert_type in AUTO_TYPES else "alert_removed"
                 await update.effective_message.reply_text(
-                    t("alert_removed", name=name, type=type_label),
+                    t(key, name=name, type=type_label),
                     parse_mode="Markdown",
                 )
             else:
@@ -1550,12 +1646,64 @@ class CommandHandlers:
             )
             return
 
+        unit = self._alert_unit(device.mac, alert_type)
+        if unit is None:
+            await update.effective_message.reply_text(
+                t("alert_battery_unknown", name=name),
+                parse_mode="Markdown",
+            )
+            return
+
         # Set alert
-        self._alert_manager.set_alert(device.mac, alert_type, threshold)
+        self._alert_manager.set_alert(device.mac, alert_type, threshold, unit=unit)
         await update.effective_message.reply_text(
-            t("alert_set_success", name=name, type=type_label, threshold=threshold),
+            t(
+                "alert_set_success",
+                name=name,
+                type=type_label,
+                threshold=format_alert_value(threshold, unit),
+            ),
             parse_mode="Markdown",
         )
+
+    def _alert_indicators(self, mac: str) -> str:
+        """Status markers for a device's currently triggered alerts."""
+        if not self._alert_manager:
+            return ""
+
+        markers: list[str] = []
+        for alert in self._alert_manager.get_alerts(mac):
+            if not alert.enabled or not alert.triggered:
+                continue
+            if alert.alert_type == "batt_low":
+                markers.append(t("alert_battery_indicator"))
+            elif alert.alert_type == "silent":
+                markers.append(t("alert_silent_indicator"))
+        return (" " + " ".join(markers)) if markers else ""
+
+    def _alert_unit(self, mac: str, alert_type: str) -> Optional[str]:
+        """Resolve the unit for a new alert rule, or None if undeterminable."""
+        if alert_type == "silent":
+            return "h"
+        if alert_type != "batt_low":
+            return "C"
+
+        reading = self._store.get_latest(mac) if self._store else None
+        if reading is not None:
+            if reading.battery_voltage is not None:
+                return "V"
+            if reading.battery_percent is not None:
+                return "%"
+
+        stored = self._db.get_latest_battery(mac) if self._db else None
+        if stored:
+            return stored[1]
+
+        # Keep an existing rule's unit when the sensor is currently quiet
+        for rule in self._alert_manager.get_alerts(mac):
+            if rule.alert_type == "batt_low":
+                return rule.unit
+        return None
 
     async def _alert_list(self, update: Update) -> None:
         """List all configured alerts and available devices."""
@@ -1579,20 +1727,22 @@ class CommandHandlers:
                     name = alert.mac
                     order = 0
 
-                type_label = t("alert_temp_low") if alert.alert_type == "temp_low" else t("alert_temp_high")
+                type_label = alert_type_label(alert.alert_type)
                 if not alert.enabled:
                     status = t("alert_status_disabled")
                 elif alert.triggered:
                     status = t("alert_status_triggered")
                 else:
                     status = t("alert_status_ok")
+                if alert.auto:
+                    status += f" _{t('alert_auto_marker')}_"
 
                 lines.append(t(
                     "alert_list_item",
                     order=order,
                     name=name,
                     type=type_label,
-                    threshold=alert.threshold,
+                    threshold=format_alert_value(alert.threshold, alert.unit),
                     status=status,
                 ))
         else:

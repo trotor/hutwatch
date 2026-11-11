@@ -90,6 +90,23 @@ class RemoteSiteConfig:
 
 
 @dataclass
+class DeviceWatchdogConfig:
+    """Thresholds for automatic battery and silence alerts.
+
+    Set any threshold to 0 to disable that check. Battery alerts are off by
+    default: low batteries are shown as a UI indicator instead (battery.py),
+    because coin-cell voltage swings with temperature and instantaneous
+    thresholds flap between triggered and recovered.
+    """
+
+    battery_voltage_low: float = 0.0
+    battery_percent_low: int = 0
+    silent_hours: int = 12
+    cold_grace_temp: float = -15.0
+    remind_days: int = 7
+
+
+@dataclass
 class AppConfig:
     """Application configuration."""
 
@@ -103,6 +120,7 @@ class AppConfig:
     api_token: Optional[str] = None
     peer_watchdog_threshold: int = 900
     peer_watchdog_interval: int = 60
+    device_watchdog: DeviceWatchdogConfig = field(default_factory=DeviceWatchdogConfig)
     remote_sites: list[RemoteSiteConfig] = field(default_factory=list)
     peers: list[RemoteSiteConfig] = field(default_factory=list)
 

@@ -6,7 +6,15 @@ from pathlib import Path
 import yaml
 
 from .i18n import t
-from .models import AppConfig, RemoteSiteConfig, SensorConfig, SensorType, TelegramConfig, WeatherConfig
+from .models import (
+    AppConfig,
+    DeviceWatchdogConfig,
+    RemoteSiteConfig,
+    SensorConfig,
+    SensorType,
+    TelegramConfig,
+    WeatherConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +104,8 @@ def load_config(config_path: Path) -> AppConfig:
         logger.warning("Invalid peer_watchdog.check_interval_seconds; using default")
         peer_watchdog_interval = 60
 
+    device_watchdog = _load_device_watchdog(data.get("device_watchdog") or {})
+
     remote_sites = []
     for site_data in data.get("remote_sites", []):
         try:
@@ -135,8 +145,35 @@ def load_config(config_path: Path) -> AppConfig:
         api_token=api_token,
         peer_watchdog_threshold=peer_watchdog_threshold,
         peer_watchdog_interval=peer_watchdog_interval,
+        device_watchdog=device_watchdog,
         remote_sites=remote_sites,
         peers=peers,
     )
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config
+
+
+def _load_device_watchdog(data: dict) -> DeviceWatchdogConfig:
+    """Parse the device_watchdog block, falling back to defaults per field."""
+    defaults = DeviceWatchdogConfig()
+
+    def _number(key: str, default, cast):
+        if key not in data:
+            return default
+        try:
+            return cast(data[key])
+        except (ValueError, TypeError):
+            logger.warning("Invalid device_watchdog.%s; using default %s", key, default)
+            return default
+
+    return DeviceWatchdogConfig(
+        battery_voltage_low=_number(
+            "battery_voltage_low", defaults.battery_voltage_low, float
+        ),
+        battery_percent_low=_number(
+            "battery_percent_low", defaults.battery_percent_low, int
+        ),
+        silent_hours=_number("silent_hours", defaults.silent_hours, int),
+        cold_grace_temp=_number("cold_grace_temp", defaults.cold_grace_temp, float),
+        remind_days=_number("remind_days", defaults.remind_days, int),
+    )

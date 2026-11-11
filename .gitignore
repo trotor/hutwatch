@@ -3,6 +3,10 @@ config.yaml
 
 # Database
 *.db
+*.db.bak.*
+
+# Logs
+*.log
 
 # Python
 __pycache__/

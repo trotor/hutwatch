@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+from .battery import remote_battery_low
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .formatting import format_age_long
@@ -136,6 +137,7 @@ class ConsoleReporter:
 
         # Build rows
         rows: list[tuple[str, str, str, str, str]] = []
+        any_low = False
         for mac, reading in sorted(readings.items()):
             if mac in hidden_macs:
                 continue
@@ -151,6 +153,9 @@ class ConsoleReporter:
                 battery = f"{reading.battery_voltage:.2f}V"
             else:
                 battery = "-"
+            if self._store.get_battery_low(mac):
+                battery += "!"
+                any_low = True
 
             age = (now - reading.timestamp).total_seconds()
             age_str = format_age_long(age)
@@ -180,6 +185,8 @@ class ConsoleReporter:
         for name, temp, hum, batt, age in rows:
             lines.append(f"{name:<{name_w}}  {temp:>7}  {hum:>5}  {batt:>6}  {age:>7}")
         lines.append(separator)
+        if any_low:
+            lines.append(t("console_battery_low_note"))
 
         print("\n".join(lines))
 
@@ -225,6 +232,8 @@ class ConsoleReporter:
                 battery = f"{s.battery_voltage:.2f}V"
             else:
                 battery = "-"
+            if remote_battery_low(self._store, s):
+                battery += "!"
 
             # Effective age = sensor age + time since fetch
             effective_age = s.age_seconds or 0

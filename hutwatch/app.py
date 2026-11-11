@@ -116,7 +116,7 @@ class HutWatchApp:
         self._aggregator = Aggregator(self._config, self._store, self._db, self._weather)
 
         # Initialize alert manager (wired to aggregator after remote poller is created)
-        self._alert_manager = AlertManager(self._db)
+        self._alert_manager = AlertManager(self._db, self._config.device_watchdog)
 
         # Start API server if configured (CLI --api-port wins over config)
         api_port = self._api_port or self._config.api_port
@@ -337,22 +337,8 @@ class HutWatchApp:
 
     async def _emit_alerts(self, events: list) -> None:
         """Route alert events to the active UI."""
-        from .alerts import AlertEvent
-        from .i18n import t
-
         for event in events:
-            if event.is_recovery:
-                text = t("alert_recovery",
-                         name=event.device_name,
-                         temp=event.current_value,
-                         threshold=event.threshold)
-            else:
-                direction = t("alert_direction_below") if event.alert_type == "temp_low" else t("alert_direction_above")
-                text = t("alert_triggered",
-                         name=event.device_name,
-                         temp=event.current_value,
-                         direction=direction,
-                         threshold=event.threshold)
+            text = self._format_alert(event)
 
             # Send to Telegram
             if self._bot:
@@ -366,6 +352,43 @@ class HutWatchApp:
                 self._tui.add_alert_event(event)
 
             logger.info("Alert: %s", text)
+
+    @staticmethod
+    def _format_alert(event) -> str:
+        """Build the notification text for one alert event."""
+        from .formatting import format_alert_value
+        from .i18n import t
+
+        value = format_alert_value(event.current_value, event.unit)
+        limit = format_alert_value(event.threshold, event.unit)
+
+        if event.alert_type == "batt_low":
+            if event.is_recovery:
+                return t("alert_battery_recovery", name=event.device_name, value=value)
+            key = "alert_battery_reminder" if event.is_reminder else "alert_battery_low"
+            return t(key, name=event.device_name, value=value, threshold=limit)
+
+        if event.alert_type == "silent":
+            if event.is_recovery:
+                return t("alert_silent_recovery", name=event.device_name)
+            key = "alert_silent_reminder" if event.is_reminder else "alert_silent"
+            return t(key, name=event.device_name, value=value, threshold=limit)
+
+        if event.is_recovery:
+            return t("alert_recovery",
+                     name=event.device_name,
+                     temp=event.current_value,
+                     threshold=event.threshold)
+
+        direction = (
+            t("alert_direction_below") if event.alert_type == "temp_low"
+            else t("alert_direction_above")
+        )
+        return t("alert_triggered",
+                 name=event.device_name,
+                 temp=event.current_value,
+                 direction=direction,
+                 threshold=event.threshold)
 
     async def run(self) -> None:
         """Run the application until shutdown signal."""

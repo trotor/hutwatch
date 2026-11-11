@@ -220,6 +220,46 @@ sudo journalctl -u hutwatch -f
 | `/rename 1 Living room` | Rename device 1 |
 | `/report on/off` | Toggle scheduled reports |
 
+## Alerts
+
+HutWatch warns about three things: temperature crossing a limit you set, a battery running low, and a device that has stopped reporting.
+
+| Command | Description |
+|---------|-------------|
+| `/alert` | List all alerts |
+| `/alert 1 low -5` | Warn when device 1 drops below −5 °C |
+| `/alert 1 high 30` | Warn when device 1 rises above 30 °C |
+| `/alert 1 batt 2.4` | Battery limit (volts or percent, matching what the sensor reports) |
+| `/alert 1 silent 24` | Warn when device 1 hasn't reported for 24 h |
+| `/alert 1 batt off` | Disable one alert |
+| `/alert 1 recovery on` | Also notify when the temperature returns to normal |
+
+The same commands work in the TUI as `a 1 batt 2.4`, and remote sensors are addressed as `r1`, `r2`.
+
+**Low batteries are shown as an indicator, not a notification.** A low cell gets a marker after its sensor line — `batt!` in the TUI, `!` in console output, 🪫 in Telegram listings — remote/peer sensors included. Coin-cell voltage swings with temperature, so the marker isn't based on the current reading: each 5-minute sample over the last 72 h is compared against a temperature-dependent limit (Ruuvi Station's: 2.5 V at ≥ 0 °C, 2.3 V at −20…0 °C, 2.0 V below −20 °C), and the battery is flagged only if it never reached its limit in that window. Cold nights and long frosts don't trigger it, and it clears only once the cell is 0.1 V above its limit.
+
+**Silence alerts are automatic** (battery alerts too, if you opt in by setting `battery_voltage_low` / `battery_percent_low` — they are `0`, i.e. off, by default). Rules are created for every device that reports data, using the thresholds in the `device_watchdog` config block, so you don't have to set them up per sensor. Setting a threshold by hand pins it — later changes to the config default won't move it.
+
+Both repeat every `remind_days` (7 by default) for as long as the condition lasts, so a battery you meant to replace keeps reminding you, and both send a recovery message when the battery is changed or the device comes back.
+
+Two guards keep them quiet when they should be:
+
+- **Frost.** Coin-cell voltage sags in the cold and recovers when the sensor warms. Battery alerts are skipped while a sensor reads below `cold_grace_temp` (−15 °C by default), so a cold night doesn't look like a dying cell.
+- **Startup and stale devices.** Silence alerts wait 15 minutes after startup for Bluetooth to hear the sensors, and devices that have already been quiet for over a week get no new rules — a sensor that vanished months ago is not news.
+
+Configure the defaults in `config.yaml`:
+
+```yaml
+device_watchdog:
+  battery_voltage_low: 0     # V, opt-in battery alerts (e.g. 2.4); 0 = indicator only
+  battery_percent_low: 0     # %, opt-in for sensors reporting percent; 0 = off
+  silent_hours: 12
+  cold_grace_temp: -15
+  remind_days: 7
+```
+
+Set any threshold to `0` to disable that check.
+
 ## Interactive Menu
 
 The `/menu` or `/start` command opens an interactive menu with inline buttons:

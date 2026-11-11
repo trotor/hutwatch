@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from .battery import update_battery_states
 from .ble.sensor_store import SensorStore
 from .db import Database
 from .models import AppConfig, SensorConfig, SensorReading, SensorType, WeatherData
@@ -25,9 +26,9 @@ DEMO_SENSORS = [
     {"mac": "AA:BB:CC:DD:EE:02", "name": "Makuuhuone", "type": "ruuvi",
      "temp": 19.8, "hum": 45.0, "bat_pct": 72, "bat_v": 2.78, "rssi": -71},
     {"mac": "AA:BB:CC:DD:EE:03", "name": "Sauna", "type": "xiaomi",
-     "temp": 24.1, "hum": 38.0, "bat_pct": 64, "bat_v": None, "rssi": -58},
+     "temp": 24.1, "hum": 38.0, "bat_pct": 9, "bat_v": 2.38, "rssi": -58},
     {"mac": "AA:BB:CC:DD:EE:04", "name": "Ulkokatos", "type": "ruuvi",
-     "temp": -3.2, "hum": 89.0, "bat_pct": 91, "bat_v": 3.05, "rssi": -80},
+     "temp": -3.2, "hum": 89.0, "bat_pct": 41, "bat_v": 2.42, "rssi": -80},
 ]
 
 DEMO_WEATHER = {
@@ -45,7 +46,8 @@ DEMO_REMOTE_SENSORS = [
     RemoteSensor(name="Makuuhuone", mac="FF:EE:DD:CC:BB:02", type="xiaomi",
                  order=2, temperature=20.1, humidity=43.0, age_seconds=15),
     RemoteSensor(name="Parveke", mac="FF:EE:DD:CC:BB:03", type="ruuvi",
-                 order=3, temperature=-1.8, humidity=82.0, age_seconds=30),
+                 order=3, temperature=-1.8, humidity=82.0, age_seconds=30,
+                 battery_low=True),
 ]
 
 DEMO_REMOTE_WEATHER = RemoteWeather(
@@ -99,7 +101,8 @@ def _sinusoidal(base: float, amplitude: float, phase: float, t: float) -> float:
 def _populate_db(db: Database) -> None:
     """Insert 24h of 5-min aggregated readings + weather history."""
     now = datetime.now()
-    points = 288  # 24h * 12 per hour
+    points = 289  # 24h * 12 per hour, both ends inclusive
+    bat_v = {s["mac"]: s["bat_v"] for s in DEMO_SENSORS}
 
     # Sensor base temps and daily amplitudes
     profiles = [
@@ -122,6 +125,11 @@ def _populate_db(db: Database) -> None:
                 temp_min=round(temp - abs(noise) - 0.2, 2),
                 temp_max=round(temp + abs(noise) + 0.2, 2),
                 humidity_avg=round(p["hum"] + random.gauss(0, 1.5), 1),
+                # Battery voltage sags in the cold, rises when warm
+                battery_voltage=(
+                    round(bat_v[p["mac"]] + 0.015 * (temp - p["base"]), 3)
+                    if bat_v.get(p["mac"]) is not None else None
+                ),
                 sample_count=random.randint(4, 6),
             )
 
@@ -184,6 +192,7 @@ async def run_demo() -> None:
     # Sensor store with live readings
     store = SensorStore()
     _populate_store(store)
+    update_battery_states(store, db, [s["mac"] for s in DEMO_SENSORS])
 
     # Weather stand-in
     w = DEMO_WEATHER

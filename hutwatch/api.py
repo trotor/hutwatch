@@ -55,6 +55,7 @@ def build_status_payload(
             entry["humidity"] = reading.humidity
             entry["battery_percent"] = reading.battery_percent
             entry["battery_voltage"] = reading.battery_voltage
+            entry["battery_low"] = store.get_battery_low(d.mac)
             entry["timestamp"] = reading.timestamp.strftime("%Y-%m-%d %H:%M:%S")
             entry["age_seconds"] = int(age)
         else:
