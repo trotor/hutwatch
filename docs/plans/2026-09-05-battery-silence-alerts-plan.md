@@ -1,5 +1,10 @@
 # Battery & Silence Alerts — Implementation Plan
 
+> **Superseded in part (2026-11-10, #17):** auto-provisioned battery alerts flapped around the
+> threshold, so battery thresholds now default to 0 (off) and low batteries are shown as a
+> temperature-aware UI marker (`hutwatch/battery.py`). Silence alerts and opt-in battery alerts
+> work as described below.
+
 **Issue:** [#16](https://github.com/trotor/hutwatch/issues/16)
 
 **Goal:** Warn about draining batteries and devices that have gone quiet, automatically and repeatedly, without per-device setup.

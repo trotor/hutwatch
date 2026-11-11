@@ -959,10 +959,14 @@ class TuiDashboard:
                         parts.append(f"{DIM}↕ {stats['temp_min']:.1f}–{stats['temp_max']:.1f}{RESET}")
 
                 # Alert indicators, one per triggered condition
-                for indicator in self._alert_indicators(mac):
-                    parts.append(indicator)
+                alert_indicators = self._alert_indicators(mac)
+                parts.extend(alert_indicators)
 
-                if self._store.get_battery_low(mac):
+                # A triggered batt_low alert already marks the battery
+                batt_alert = t("alert_battery_indicator")
+                if self._store.get_battery_low(mac) and not any(
+                    batt_alert in i for i in alert_indicators
+                ):
                     parts.append(_battery_low_marker())
 
                 result.append("  ".join(parts))

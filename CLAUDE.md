@@ -216,7 +216,9 @@ and last-seen times, and `HutWatchApp._format_alert()` turns each event into a m
   `formatting.format_alert_value()` for display and `formatting.resolve_alert_type()` to
   map a user-typed action (`low`, `high`, `batt`, `silent`) to a type and label.
 - **Auto-provisioned rules.** `batt_low` and `silent` (`alerts.AUTO_TYPES`) are created for
-  every active device from the `device_watchdog` config block. `auto = 1` marks a rule that
+  every active device from the `device_watchdog` config block. Battery thresholds default to 0,
+  so out of the box only `silent` rules exist; the low-battery UI marker comes from `battery.py`,
+  not from alerts. A triggered `batt_low` alert and the marker share the 🪫 glyph — UIs show it once. `auto = 1` marks a rule that
   still follows the config default; any user-set threshold clears it. Devices unheard from
   for more than `AUTO_RULE_MAX_AGE_DAYS` get no new rules — device rows outlive sensors,
   especially on macOS where BLE identifiers rotate.

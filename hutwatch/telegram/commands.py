@@ -296,8 +296,13 @@ class CommandHandlers:
                         info += f", {reading.battery_voltage:.2f}V"
                     elif reading.battery_percent is not None:
                         info += f", {reading.battery_percent}%"
-                    info += self._alert_indicators(device.mac)
-                    if self._store.get_battery_low(reading.mac):
+                    alert_markers = self._alert_indicators(device.mac)
+                    info += alert_markers
+                    # A triggered batt_low alert already shows the same 🪫 marker
+                    if (
+                        self._store.get_battery_low(reading.mac)
+                        and t("alert_battery_indicator") not in alert_markers
+                    ):
                         info += f" {t('tg_battery_low_indicator')}"
 
                     lines.append(f"  {status_emoji} {device.display_order}. {name}: {info}")
