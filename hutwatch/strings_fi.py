@@ -15,6 +15,14 @@ STRINGS: dict = {
     "common_no_history_for_sensor": "Ei historiaa anturille {name}",
     "common_avg_abbr": "ka",
     "common_precipitation": "sade",
+    "common_bt_permission_missing": (
+        "⚠️  Varoitus: terminaalisovellukselta \"{app}\" puuttuu macOS:n Bluetooth-käyttöoikeuden\n"
+        "    kuvaus (NSBluetoothAlwaysUsageDescription). macOS kaataa HutWatchin heti, kun\n"
+        "    BLE-skannaus alkaa — näet vain viestin \"zsh: abort\".\n"
+        "    Aja HutWatch terminaalissa, jolla on Bluetooth-lupa\n"
+        "    (Järjestelmäasetukset → Tietosuoja ja suojaus → Bluetooth)."
+    ),
+    "common_bt_permission_continue": "    Paina Enter jatkaaksesi silti tai Ctrl+C lopettaaksesi.",
 
     # ── Time formatting ───────────────────────────────────────────────
     "time_ago_seconds": "{n}s sitten",

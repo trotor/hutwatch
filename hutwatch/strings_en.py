@@ -15,6 +15,14 @@ STRINGS: dict = {
     "common_no_history_for_sensor": "No history for sensor {name}",
     "common_avg_abbr": "avg",
     "common_precipitation": "precip",
+    "common_bt_permission_missing": (
+        "⚠️  Warning: the terminal app \"{app}\" has no macOS Bluetooth usage description\n"
+        "    (NSBluetoothAlwaysUsageDescription). macOS will kill HutWatch as soon as BLE\n"
+        "    scanning starts — all you will see is \"zsh: abort\".\n"
+        "    Run HutWatch from a terminal that has Bluetooth permission\n"
+        "    (System Settings → Privacy & Security → Bluetooth)."
+    ),
+    "common_bt_permission_continue": "    Press Enter to continue anyway, or Ctrl+C to quit.",
 
     # ── Time formatting ───────────────────────────────────────────────
     "time_ago_seconds": "{n}s ago",
