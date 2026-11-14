@@ -107,6 +107,34 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _warn_bluetooth_permission(pause: bool) -> bool:
+    """Warn before macOS TCC kills us for BLE access. Returns False if the user quit.
+
+    Interactive runs only: under launchd/systemd stderr is not a TTY and the
+    check is skipped. In TUI mode we wait for Enter, since the dashboard clears
+    the screen before the abort would land.
+    """
+    if not sys.stderr.isatty():
+        return True
+
+    from .bt_permission import find_bluetooth_blocker
+
+    app_name = find_bluetooth_blocker()
+    if not app_name:
+        return True
+
+    from .i18n import t
+
+    print(t("common_bt_permission_missing", app=app_name), file=sys.stderr)
+    if pause and sys.stdin.isatty():
+        print(t("common_bt_permission_continue"), file=sys.stderr)
+        try:
+            input()
+        except (KeyboardInterrupt, EOFError):
+            return False
+    return True
+
+
 def main() -> int:
     """Main entry point."""
     args = parse_args()
@@ -143,6 +171,9 @@ def main() -> int:
     from .i18n import init_lang
 
     init_lang(lang)
+
+    if not _warn_bluetooth_permission(args.tui):
+        return 0
 
     # Run the application
     try:

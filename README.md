@@ -359,6 +359,10 @@ When a cabin stops pushing for longer than `threshold_seconds`, the hub sends a 
 
 ## macOS: Background Service and Desktop Widget
 
+### Bluetooth permission ("zsh: abort")
+
+macOS attributes Bluetooth access to the terminal app HutWatch runs in. If that app does not declare a Bluetooth usage description (`NSBluetoothAlwaysUsageDescription` — e.g. some third-party terminals), macOS kills HutWatch with `zsh: abort` as soon as BLE scanning starts. HutWatch detects this at startup and prints a warning naming the app (in `--tui` it waits for Enter). Run it from a terminal that has Bluetooth permission instead (System Settings → Privacy & Security → Bluetooth). `--demo` does not use Bluetooth and works anywhere.
+
 ### Background Service with launchd
 
 Native macOS service management. Starts automatically on login and restarts on failure.

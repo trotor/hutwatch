@@ -359,6 +359,10 @@ Kun mökki lakkaa pushaamasta dataa yli `threshold_seconds` ajan, keskuspää l�
 
 ## macOS: taustapalvelu ja työpöytäwidget
 
+### Bluetooth-lupa ("zsh: abort")
+
+macOS kohdistaa Bluetoothin käytön siihen terminaalisovellukseen, jossa HutWatch ajetaan. Jos sovellus ei ilmoita Bluetooth-käyttötarkoitusta (`NSBluetoothAlwaysUsageDescription` — esim. jotkin kolmannen osapuolen terminaalit), macOS kaataa HutWatchin viestillä `zsh: abort` heti kun BLE-skannaus alkaa. HutWatch tunnistaa tilanteen käynnistyessä ja tulostaa varoituksen, jossa sovellus mainitaan nimeltä (`--tui`-tilassa se odottaa Enteriä). Aja HutWatch terminaalissa, jolla on Bluetooth-lupa (Järjestelmäasetukset → Tietosuoja ja suojaus → Bluetooth). `--demo` ei käytä Bluetoothia ja toimii missä tahansa.
+
 ### Taustaajo launchd:llä
 
 macOS:n natiivi palvelunhallinta. Käynnistyy automaattisesti kirjautumisen yhteydessä ja uudelleenkäynnistyy virheen sattuessa.
