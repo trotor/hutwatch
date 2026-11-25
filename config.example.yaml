@@ -87,6 +87,11 @@ sensors: []
 #     poll_interval: 30
 #     # token: "must-match-peer-api_token"
 
+# Heating controller (optional) — enables the Telegram /heating (/lammitys) command,
+# a read-only view of a floor-heating controller's JSON API on the same machine:
+# rooms, current spot price, a car-charging hint and active alerts.
+# heating_url: "http://127.0.0.1:8077"
+
 # Read-only remote sites (optional, legacy)
 # One-way monitoring: fetches data but doesn't share yours.
 # remote_sites:

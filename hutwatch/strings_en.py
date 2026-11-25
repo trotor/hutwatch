@@ -138,6 +138,14 @@ STRINGS: dict = {
     "tg_weather_24h": "📈 *24h:*",
     "tg_weather_precip_total": "🌧 *Total precipitation:*",
 
+    # ── Telegram: heating ─────────────────────────────────────────────
+    "tg_heating_header": "🔥 *Heating* {time}",
+    "tg_heating_price": "💶 Now {now:.1f} c/kWh · cheapest {at} ({low:.1f} c)",
+    "tg_heating_room": "{icon} {name} {room:.1f}° · floor {floor:.1f}°",
+    "tg_heating_room_no_data": "▫️ {name}: no data",
+    "tg_heating_not_configured": "❌ Heating not configured (heating\\_url)",
+    "tg_heating_unavailable": "❌ Heating status unavailable",
+
     # ── Telegram: help ────────────────────────────────────────────────
     "tg_help_full": (
         "🏠 *HutWatch v{version} - Help*\n"
@@ -146,6 +154,7 @@ STRINGS: dict = {
         "/temps - Current temperatures + weather\n"
         "/status - System status\n"
         "/weather - Outdoor weather details\n"
+        "/heating - Floor heating status\n"
         "/report on|off - Toggle scheduled reports\n"
         "\n"
         "*Device management:*\n"

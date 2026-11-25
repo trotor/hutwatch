@@ -136,6 +136,14 @@ STRINGS: dict = {
     "tg_weather_24h": "📈 *24h:*",
     "tg_weather_precip_total": "🌧 *Sade yhteensä:*",
 
+    # ── Telegram: heating ─────────────────────────────────────────────
+    "tg_heating_header": "🔥 *Lämmitys* {time}",
+    "tg_heating_price": "💶 Nyt {now:.1f} c/kWh · halvin {at} ({low:.1f} c)",
+    "tg_heating_room": "{icon} {name} {room:.1f}° · lattia {floor:.1f}°",
+    "tg_heating_room_no_data": "▫️ {name}: ei tietoa",
+    "tg_heating_not_configured": "❌ Lämmitystä ei ole määritetty (heating\\_url)",
+    "tg_heating_unavailable": "❌ Lämmityksen tila ei ole saatavilla",
+
     # ── Telegram: help ────────────────────────────────────────────────
     "tg_help_full": (
         "🏠 *HutWatch v{version} - Ohje*\n"
@@ -144,6 +152,7 @@ STRINGS: dict = {
         "/temps - Nykyiset lämpötilat + sää\n"
         "/status - Järjestelmän tila\n"
         "/weather - Ulkosää yksityiskohtaisesti\n"
+        "/lammitys - Lattialämmityksen tila\n"
         "/report on|off - Raportointi päälle/pois\n"
         "\n"
         "*Laitteiden hallinta:*\n"

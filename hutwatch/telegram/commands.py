@@ -1042,6 +1042,31 @@ class CommandHandlers:
             parse_mode="Markdown",
         )
 
+    async def heating(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /heating (/lammitys) - status of the configured heating controller."""
+        if not update.effective_message:
+            return
+
+        if not self._config.heating_url:
+            await update.effective_message.reply_text(
+                t("tg_heating_not_configured"), parse_mode="Markdown"
+            )
+            return
+
+        from ..heating import fetch_heating, format_heating
+
+        data = await fetch_heating(self._config.heating_url)
+        if data is None:
+            await update.effective_message.reply_text(t("tg_heating_unavailable"))
+            return
+        await update.effective_message.reply_text(
+            format_heating(data, datetime.now().astimezone()), parse_mode="Markdown"
+        )
+
     async def help(
         self,
         update: Update,

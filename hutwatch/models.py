@@ -123,6 +123,7 @@ class AppConfig:
     device_watchdog: DeviceWatchdogConfig = field(default_factory=DeviceWatchdogConfig)
     remote_sites: list[RemoteSiteConfig] = field(default_factory=list)
     peers: list[RemoteSiteConfig] = field(default_factory=list)
+    heating_url: Optional[str] = None
 
     def get_sensor_by_mac(self, mac: str) -> Optional[SensorConfig]:
         """Get sensor config by MAC address."""

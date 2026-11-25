@@ -92,6 +92,10 @@ def load_config(config_path: Path) -> AppConfig:
     if api_token is not None:
         api_token = str(api_token)
 
+    heating_url = data.get("heating_url")
+    if heating_url is not None:
+        heating_url = str(heating_url).rstrip("/") or None
+
     watchdog_data = data.get("peer_watchdog") or {}
     try:
         peer_watchdog_threshold = int(watchdog_data.get("threshold_seconds", 900))
@@ -148,6 +152,7 @@ def load_config(config_path: Path) -> AppConfig:
         device_watchdog=device_watchdog,
         remote_sites=remote_sites,
         peers=peers,
+        heating_url=heating_url,
     )
     logger.info("Loaded configuration with %d sensors", len(sensors))
     return config

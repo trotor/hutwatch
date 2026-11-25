@@ -73,6 +73,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("nimea", self._commands.rename))
         self._app.add_handler(CommandHandler("weather", self._commands.weather))
         self._app.add_handler(CommandHandler("saa", self._commands.weather))
+        self._app.add_handler(CommandHandler("heating", self._commands.heating))
+        self._app.add_handler(CommandHandler("lammitys", self._commands.heating))
         self._app.add_handler(CommandHandler("menu", self._commands.menu))
         self._app.add_handler(CommandHandler("hide", self._commands.hide))
         self._app.add_handler(CommandHandler("piilota", self._commands.hide))
