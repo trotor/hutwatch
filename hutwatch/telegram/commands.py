@@ -1047,8 +1047,15 @@ class CommandHandlers:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
-        """Handle /heating (/lammitys) - status of the configured heating controller."""
+        """Handle /heating (/lammitys) - status of the configured heating controller.
+
+        Answers only in the configured chat: the status tells whether anyone is home.
+        """
         if not update.effective_message:
+            return
+        chat = update.effective_chat
+        if not self._config.telegram or chat is None or str(chat.id) != str(self._config.telegram.chat_id):
+            logger.warning("Ignored /heating from an unconfigured chat")
             return
 
         if not self._config.heating_url:
