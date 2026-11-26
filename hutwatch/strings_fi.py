@@ -209,6 +209,7 @@ STRINGS: dict = {
     "tg_menu_btn_history_7d": "📈 Historia 7d",
     "tg_menu_btn_stats_1d": "📊 Tilastot 1d",
     "tg_menu_btn_stats_7d": "📊 Tilastot 7d",
+    "tg_menu_btn_heating": "🔥 Lämmitys",
     "tg_menu_btn_status": "🔧 Status",
     "tg_menu_btn_help": "❓ Ohje",
     "tg_menu_btn_refresh": "🔄 Päivitä",

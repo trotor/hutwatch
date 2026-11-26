@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from ..battery import remote_battery_low
@@ -1042,6 +1043,10 @@ class CommandHandlers:
             parse_mode="Markdown",
         )
 
+    def _is_own_chat(self, chat) -> bool:
+        """True only for the configured chat (heating status tells whether anyone is home)."""
+        return bool(self._config.telegram) and chat is not None and str(chat.id) == str(self._config.telegram.chat_id)
+
     async def heating(
         self,
         update: Update,
@@ -1053,8 +1058,7 @@ class CommandHandlers:
         """
         if not update.effective_message:
             return
-        chat = update.effective_chat
-        if not self._config.telegram or chat is None or str(chat.id) != str(self._config.telegram.chat_id):
+        if not self._is_own_chat(update.effective_chat):
             logger.warning("Ignored /heating from an unconfigured chat")
             return
 
@@ -1086,15 +1090,8 @@ class CommandHandlers:
         from .. import __version__
         await update.effective_message.reply_text(t("tg_help_full", version=__version__), parse_mode="Markdown")
 
-    async def menu(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-    ) -> None:
-        """Handle /menu command - show main menu with buttons."""
-        if not update.effective_message:
-            return
-
+    def _menu_keyboard(self) -> list:
+        """Main menu buttons; the heating button only when a controller is configured."""
         keyboard = [
             [
                 InlineKeyboardButton(t("tg_menu_btn_temps"), callback_data="temps"),
@@ -1108,12 +1105,25 @@ class CommandHandlers:
                 InlineKeyboardButton(t("tg_menu_btn_stats_1d"), callback_data="stats_1d"),
                 InlineKeyboardButton(t("tg_menu_btn_stats_7d"), callback_data="stats_7d"),
             ],
-            [
-                InlineKeyboardButton(t("tg_menu_btn_status"), callback_data="status"),
-                InlineKeyboardButton(t("tg_menu_btn_help"), callback_data="help"),
-            ],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        if self._config.heating_url:
+            keyboard.append([InlineKeyboardButton(t("tg_menu_btn_heating"), callback_data="heating")])
+        keyboard.append([
+            InlineKeyboardButton(t("tg_menu_btn_status"), callback_data="status"),
+            InlineKeyboardButton(t("tg_menu_btn_help"), callback_data="help"),
+        ])
+        return keyboard
+
+    async def menu(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /menu command - show main menu with buttons."""
+        if not update.effective_message:
+            return
+
+        reply_markup = InlineKeyboardMarkup(self._menu_keyboard())
 
         await update.effective_message.reply_text(
             t("tg_menu_header"),
@@ -1152,36 +1162,51 @@ class CommandHandlers:
         elif data.startswith("stats_"):
             time_arg = data.replace("stats_", "")
             await self._send_stats_response(query, time_arg)
+        elif data == "heating":
+            await self._send_heating_with_buttons(query)
         elif data == "menu":
             await self._send_menu(query)
 
     async def _send_menu(self, query) -> None:
         """Send main menu."""
-        keyboard = [
-            [
-                InlineKeyboardButton(t("tg_menu_btn_temps"), callback_data="temps"),
-                InlineKeyboardButton(t("tg_menu_btn_weather"), callback_data="weather"),
-            ],
-            [
-                InlineKeyboardButton(t("tg_menu_btn_history_1d"), callback_data="history_1d"),
-                InlineKeyboardButton(t("tg_menu_btn_history_7d"), callback_data="history_7d"),
-            ],
-            [
-                InlineKeyboardButton(t("tg_menu_btn_stats_1d"), callback_data="stats_1d"),
-                InlineKeyboardButton(t("tg_menu_btn_stats_7d"), callback_data="stats_7d"),
-            ],
-            [
-                InlineKeyboardButton(t("tg_menu_btn_status"), callback_data="status"),
-                InlineKeyboardButton(t("tg_menu_btn_help"), callback_data="help"),
-            ],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(self._menu_keyboard())
 
         await query.edit_message_text(
             t("tg_menu_header"),
             parse_mode="Markdown",
             reply_markup=reply_markup,
         )
+
+    async def _send_heating_with_buttons(self, query) -> None:
+        """Send heating status with refresh/back buttons (configured chat only)."""
+        if not self._is_own_chat(query.message.chat if query.message else None):
+            logger.warning("Ignored heating button from an unconfigured chat")
+            return
+        if not self._config.heating_url:
+            text = t("tg_heating_not_configured")
+        else:
+            from ..heating import fetch_heating, format_heating
+
+            data = await fetch_heating(self._config.heating_url)
+            if data is None:
+                text = t("tg_heating_unavailable")
+            else:
+                text = format_heating(data, datetime.now().astimezone())
+        keyboard = [
+            [
+                InlineKeyboardButton(t("tg_menu_btn_refresh"), callback_data="heating"),
+                InlineKeyboardButton(t("tg_menu_btn_back"), callback_data="menu"),
+            ],
+        ]
+        try:
+            await query.edit_message_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+        except BadRequest as e:
+            if "not modified" not in str(e).lower():  # refresh within the same minute
+                raise
 
     async def _send_temps_with_buttons(self, query) -> None:
         """Send temperatures with navigation buttons."""

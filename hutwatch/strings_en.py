@@ -211,6 +211,7 @@ STRINGS: dict = {
     "tg_menu_btn_history_7d": "📈 History 7d",
     "tg_menu_btn_stats_1d": "📊 Stats 1d",
     "tg_menu_btn_stats_7d": "📊 Stats 7d",
+    "tg_menu_btn_heating": "🔥 Heating",
     "tg_menu_btn_status": "🔧 Status",
     "tg_menu_btn_help": "❓ Help",
     "tg_menu_btn_refresh": "🔄 Refresh",
