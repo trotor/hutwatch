@@ -236,7 +236,7 @@ Handlers live in `telegram/commands.py`, registered in `telegram/bot.py:_setup_h
 - `/temps`, `/weather`, `/status`, `/history`, `/stats`, `/graph`, `/report` — data display
 - `/devices`, `/rename`, `/hide`, `/unhide`, `/showhidden` — device management
 - `/alert` — temperature, battery and silence alerts
-- `/heating` (`/lammitys`) — read-only status of a heating controller at `heating_url` (`heating.py`: rooms, price now, car hint, alerts)
+- `/heating` (`/lammitys`) — read-only status of a heating controller at `heating_url` (`heating.py`: rooms, sensors, outdoor, price now, car hint, alerts)
 - `/menu` (also `/start`) — interactive inline keyboard buttons; callbacks go to `button_callback`
 - Finnish aliases: `/laitteet`, `/nimea`, `/saa`, `/piilota`, `/nayta`, `/halytys`, `/lammitys`
 
@@ -286,7 +286,7 @@ Adding a command to either UI: use the `/add-command` skill — it covers i18n k
 - `peers`: Bidirectional peer sync (recommended — each with `name`, `url`, `poll_interval`, optional `token`). Only the connector side needs this; the listener only needs `api_port`.
 - `peer_watchdog`: `threshold_seconds` (0 disables) and `check_interval_seconds` for hub-side offline alerts
 - `device_watchdog`: defaults for the auto-provisioned silence alerts and opt-in battery alerts — `battery_voltage_low`, `battery_percent_low` (both 0/off by default), `silent_hours`, `cold_grace_temp`, `remind_days` (any threshold 0 disables that check and removes its auto rules). Low batteries are always shown as a UI marker computed by `battery.py` (temperature-banded thresholds over a 72 h window, hysteresis) — no notification.
-- `heating_url`: Optional heating controller JSON API for `/heating` (serves `/api/v1/rooms`, `/prices`, optional `/car`, `/alerts`)
+- `heating_url`: Optional heating controller JSON API for `/heating` (serves `/api/v1/rooms`, `/prices`, optional `/car`, `/alerts`, `/sensors`)
 - `remote_sites`: Legacy read-only remote monitoring (each with `name`, `url`, `poll_interval`, optional `token`)
 
 Without Telegram, use `--tui` for interactive dashboard or `--console` for simple output.

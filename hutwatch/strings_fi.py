@@ -141,6 +141,12 @@ STRINGS: dict = {
     "tg_heating_price": "💶 Nyt {now:.1f} c/kWh · halvin {at} ({low:.1f} c)",
     "tg_heating_room": "{icon} {name} {room:.1f}° · lattia {floor:.1f}°",
     "tg_heating_room_no_data": "▫️ {name}: ei tietoa",
+    "tg_heating_outdoor": "🌡️ Ulkona {temp:.1f}°",
+    "tg_heating_sensor": " · {name} {temp:.1f}°",
+    "tg_heating_sensor_own": "mittari",
+    "tg_heating_stale": " ⏳",
+    "tg_heating_others": "*Muut mittarit*",
+    "tg_heating_other": "▫️ {name} {temp:.1f}°",
     "tg_heating_not_configured": "❌ Lämmitystä ei ole määritetty (heating\\_url)",
     "tg_heating_unavailable": "❌ Lämmityksen tila ei ole saatavilla",
 

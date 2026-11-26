@@ -143,6 +143,12 @@ STRINGS: dict = {
     "tg_heating_price": "💶 Now {now:.1f} c/kWh · cheapest {at} ({low:.1f} c)",
     "tg_heating_room": "{icon} {name} {room:.1f}° · floor {floor:.1f}°",
     "tg_heating_room_no_data": "▫️ {name}: no data",
+    "tg_heating_outdoor": "🌡️ Outdoor {temp:.1f}°",
+    "tg_heating_sensor": " · {name} {temp:.1f}°",
+    "tg_heating_sensor_own": "sensor",
+    "tg_heating_stale": " ⏳",
+    "tg_heating_others": "*Other sensors*",
+    "tg_heating_other": "▫️ {name} {temp:.1f}°",
     "tg_heating_not_configured": "❌ Heating not configured (heating\\_url)",
     "tg_heating_unavailable": "❌ Heating status unavailable",
 
